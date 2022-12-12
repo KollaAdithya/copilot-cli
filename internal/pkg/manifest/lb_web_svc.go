@@ -186,9 +186,31 @@ func (s *LoadBalancedWebService) BuildRequired() (bool, error) {
 	return requiresBuild(s.ImageConfig.Image)
 }
 
+func (s *LoadBalancedWebService) SidecarBuildRequired() (map[string]bool, error) {
+	sidecars := s.LoadBalancedWebServiceConfig.Sidecars
+	buildRequired := make(map[string]bool)
+	for k, v := range sidecars {
+		isBuildRequired, err := requiresSidecarBuild(v)
+		if err != nil {
+			return nil, err
+		}
+		buildRequired[k] = isBuildRequired
+	}
+	return buildRequired, nil
+}
+
 // BuildArgs returns a docker.BuildArguments object given a ws root directory.
 func (s *LoadBalancedWebService) BuildArgs(wsRoot string) *DockerBuildArgs {
 	return s.ImageConfig.Image.BuildConfig(wsRoot)
+}
+
+func (s *LoadBalancedWebService) BuildSidecarArgs(wsRoot string) map[string]*DockerBuildArgs {
+	sidecars := s.LoadBalancedWebServiceConfig.Sidecars
+	scDockerBuildArgs := make(map[string]*DockerBuildArgs)
+	for k, v := range sidecars {
+		scDockerBuildArgs[k] = v.BuildSidecarConfig(wsRoot)
+	}
+	return scDockerBuildArgs
 }
 
 // EnvFile returns the location of the env file against the ws root directory.

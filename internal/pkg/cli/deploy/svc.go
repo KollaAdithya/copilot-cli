@@ -860,6 +860,28 @@ func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPus
 	return aws.String(digest), nil
 }
 
+func (d *workloadDeployer) uploadSidecarContainerImages(imgBuilderPusher imageBuilderPusher) (map[string]string, error) {
+	required, err := manifest.SidecarDockerfileBuildRequired(d.mft)
+	if err != nil {
+		return nil, err
+	}
+
+	buildarg, err := buildSidecarArgs(d.name, d.workspacePath, d.mft)
+	if err != nil {
+		return nil, err
+	}
+	digests := make(map[string]string)
+	for k, v := range buildarg {
+		if required[k] {
+			digests[k], err = imgBuilderPusher.BuildAndPush(dockerengine.New(exec.NewCmd()), v)
+			if err != nil {
+				return nil, fmt.Errorf("build and push image: %w", err)
+			}
+		}
+	}
+	return digests, nil
+}
+
 type uploadArtifactsToS3Input struct {
 	fs       fileReader
 	uploader uploader
@@ -892,6 +914,13 @@ func (d *workloadDeployer) uploadArtifacts(customResources customResourcesFunc) 
 	imageDigest, err := d.uploadContainerImage(d.imageBuilderPusher)
 	if err != nil {
 		return nil, err
+	}
+
+	sidecarImageDigests, _ := d.uploadSidecarContainerImages(d.imageBuilderPusher)
+
+	for k, v := range sidecarImageDigests {
+		log.Infoln("sidecarname is:", k)
+		log.Info(v)
 	}
 	s3Artifacts, err := d.uploadArtifactsToS3(&uploadArtifactsToS3Input{
 		fs:       d.fs,
@@ -1241,6 +1270,30 @@ func buildArgs(name, imageTag, workspacePath string, unmarshaledManifest interfa
 		Platform:   mf.ContainerPlatform(),
 		Tags:       tags,
 	}, nil
+}
+
+func buildSidecarArgs(name, workspacePath string, unmarshaledManifest interface{}) (map[string]*dockerengine.BuildArguments, error) {
+	type dfArgs interface {
+		BuildSidecarArgs(rootDirectory string) map[string]*manifest.DockerBuildArgs
+		ContainerPlatform() string
+	}
+	mf, ok := unmarshaledManifest.(dfArgs)
+	if !ok {
+		return nil, fmt.Errorf("%s does not have required methods BuildArgs() and ContainerPlatform()", name)
+	}
+	args := mf.BuildSidecarArgs(workspacePath)
+	deBuildArguments := make(map[string]*dockerengine.BuildArguments)
+	for k, v := range args {
+		deBuildArguments[k] = &dockerengine.BuildArguments{
+			Dockerfile: *v.Dockerfile,
+			Context:    *v.Context,
+			Args:       v.Args,
+			CacheFrom:  v.CacheFrom,
+			Target:     aws.StringValue(v.Target),
+			Platform:   mf.ContainerPlatform(),
+		}
+	}
+	return deBuildArguments, nil
 }
 
 func envFile(unmarshaledManifest interface{}) string {

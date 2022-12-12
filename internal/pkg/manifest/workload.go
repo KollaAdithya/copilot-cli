@@ -841,6 +841,21 @@ func DockerfileBuildRequired(svc interface{}) (bool, error) {
 	return required, nil
 }
 
+func SidecarDockerfileBuildRequired(svc interface{}) (map[string]bool, error) {
+	type manifest interface {
+		SidecarBuildRequired() (map[string]bool, error)
+	}
+	mf, ok := svc.(manifest)
+	if !ok {
+		return nil, fmt.Errorf("manifest does not have required methods SidecarBuildRequired()")
+	}
+	required, err := mf.SidecarBuildRequired()
+	if err != nil {
+		return nil, fmt.Errorf("check if manifest requires building from local Dockerfile: %w", err)
+	}
+	return required, nil
+}
+
 func stringP(s string) *string {
 	if s == "" {
 		return nil
