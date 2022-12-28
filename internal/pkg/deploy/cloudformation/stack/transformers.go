@@ -15,6 +15,7 @@ import (
 	"github.com/aws/copilot-cli/internal/pkg/aws/partitions"
 	"github.com/aws/copilot-cli/internal/pkg/deploy"
 	"github.com/aws/copilot-cli/internal/pkg/template/override"
+	"github.com/aws/copilot-cli/internal/pkg/term/log"
 
 	"github.com/aws/copilot-cli/internal/pkg/aws/s3"
 
@@ -67,7 +68,7 @@ var (
 )
 
 // convertSidecar converts the manifest sidecar configuration into a format parsable by the templates pkg.
-func convertSidecar(s map[string]*manifest.SidecarConfig) ([]*template.SidecarOpts, error) {
+func convertSidecar(s map[string]*manifest.SidecarConfig, scImage *SideCarECRImage) ([]*template.SidecarOpts, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -94,10 +95,18 @@ func convertSidecar(s map[string]*manifest.SidecarConfig) ([]*template.SidecarOp
 		if err != nil {
 			return nil, err
 		}
+		var sImage string
+		//sImage := convertSideCarImage(config.SImage.Basic, scImage)
+		if config.SImage.Basic != "" {
+			sImage = config.SImage.Basic
+		} else {
+			sImage = scImage.GetLocation(name)
+		}
 		mp := convertSidecarMountPoints(config.MountPoints)
 		sidecars = append(sidecars, &template.SidecarOpts{
 			Name:       name,
 			Image:      config.Image,
+			SImage:     aws.String(sImage),
 			Essential:  config.Essential,
 			Port:       port,
 			Protocol:   protocol,
@@ -113,6 +122,9 @@ func convertSidecar(s map[string]*manifest.SidecarConfig) ([]*template.SidecarOp
 			HealthCheck:  convertContainerHealthCheck(config.HealthCheck),
 			Command:      command,
 		})
+	}
+	for _, v := range sidecars {
+		log.Infoln("Sidecar Image digests or Direcr Image:", *v.SImage)
 	}
 	return sidecars, nil
 }

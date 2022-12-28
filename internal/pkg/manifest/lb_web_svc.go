@@ -213,6 +213,15 @@ func (s *LoadBalancedWebService) BuildSidecarArgs(wsRoot string) map[string]*Doc
 	return scDockerBuildArgs
 }
 
+func (s *LoadBalancedWebService) GetAllSidecarImages() map[string]string {
+	images := map[string]string{}
+	sidecars := s.LoadBalancedWebServiceConfig.Sidecars
+	for k, v := range sidecars {
+		images[k] = v.SImage.Basic
+	}
+	return images
+}
+
 // EnvFile returns the location of the env file against the ws root directory.
 func (s *LoadBalancedWebService) EnvFile() string {
 	return aws.StringValue(s.TaskConfig.EnvFile)

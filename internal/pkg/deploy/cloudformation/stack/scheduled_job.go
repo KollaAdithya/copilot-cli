@@ -136,7 +136,7 @@ func (j *ScheduledJob) Template() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sidecars, err := convertSidecar(j.manifest.Sidecars)
+	sidecars, err := convertSidecar(j.manifest.Sidecars, j.ecsWkld.wkld.rc.SideCarImage)
 	if err != nil {
 		return "", fmt.Errorf("convert the sidecar configuration for job %s: %w", j.name, err)
 	}
@@ -277,7 +277,8 @@ func (j *ScheduledJob) awsSchedule() (string, error) {
 
 // toRate converts a cron "@every" directive to a rate expression defined in minutes.
 // example input: @every 1h30m
-//        output: rate(90 minutes)
+//
+//	output: rate(90 minutes)
 func toRate(duration string) (string, error) {
 	d, err := time.ParseDuration(duration)
 	if err != nil {
@@ -302,9 +303,10 @@ func toRate(duration string) (string, error) {
 // toFixedSchedule converts cron predefined schedules into AWS-flavored cron expressions.
 // (https://godoc.org/github.com/robfig/cron#hdr-Predefined_schedules)
 // Example input: @daily
-//        output: cron(0 0 * * ? *)
-//         input: @annually
-//        output: cron(0 0 1 1 ? *)
+//
+//	output: cron(0 0 * * ? *)
+//	 input: @annually
+//	output: cron(0 0 1 1 ? *)
 func toFixedSchedule(schedule string) (string, error) {
 	switch {
 	case strings.HasPrefix(schedule, hourly):
@@ -337,7 +339,8 @@ func awsCronFieldSpecified(input string) bool {
 // BOTH DOM and DOW cannot be specified
 // DOW numbers run 1-7, not 0-6
 // Example input: 0 9 * * 1-5 (at 9 am, Monday-Friday)
-//              : cron(0 9 ? * 2-6 *) (adds required ? operator, increments DOW to 1-index, adds year)
+//
+//	: cron(0 9 ? * 2-6 *) (adds required ? operator, increments DOW to 1-index, adds year)
 func toAWSCron(schedule string) (string, error) {
 	const (
 		MIN = iota

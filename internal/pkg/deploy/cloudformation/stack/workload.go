@@ -66,7 +66,8 @@ const (
 // RuntimeConfig represents configuration that's defined outside of the manifest file
 // that is needed to create a CloudFormation stack.
 type RuntimeConfig struct {
-	Image              *ECRImage         // Optional. Image location in an ECR repository.
+	Image              *ECRImage // Optional. Image location in an ECR repository.
+	SideCarImage       *SideCarECRImage
 	AddonsTemplateURL  string            // Optional. S3 object URL for the addons template.
 	EnvFileARN         string            // Optional. S3 object ARN for the env file.
 	AdditionalTags     map[string]string // AdditionalTags are labels applied to resources in the workload stack.
@@ -87,6 +88,12 @@ type ECRImage struct {
 	Digest   string // The image digest.
 }
 
+type SideCarECRImage struct {
+	RepoURL string // RepoURL is the ECR repository URL the container image should be pushed to.
+	//ImageTag       string            // Tag is the container image's unique tag.
+	SideCarDigests map[string]string // The sidecar image digests.
+}
+
 // GetLocation returns the ECR image URI.
 // If a tag is provided by the user or discovered from git then prioritize referring to the image via the tag.
 // Otherwise, each image after a push to ECR will get a digest and we refer to the image via the digest.
@@ -101,6 +108,14 @@ func (i ECRImage) GetLocation() string {
 	return fmt.Sprintf("%s:%s", i.RepoURL, "latest")
 }
 
+func (s SideCarECRImage) GetLocation(sideCarName string) string {
+
+	if s.SideCarDigests[sideCarName] != "" {
+		return fmt.Sprintf("%s@%s", s.RepoURL, s.SideCarDigests[sideCarName])
+	}
+	return fmt.Sprintf("%s:%s", s.RepoURL, "latest")
+}
+
 type addons interface {
 	Template() (string, error)
 	Parameters() (string, error)
@@ -110,16 +125,21 @@ type location interface {
 	GetLocation() string
 }
 
+// type scdirectimage interface {
+// 	GetDirectSideCarImage() string
+// }
+
 // wkld represents a generic containerized workload.
 // A workload can be a long-running service, an ephemeral task, or a periodic task.
 type wkld struct {
-	name        string
-	env         string
-	app         string
-	permBound   string
-	rc          RuntimeConfig
-	image       location
-	rawManifest []byte // Content of the manifest file without any transformations.
+	name         string
+	env          string
+	app          string
+	permBound    string
+	rc           RuntimeConfig
+	image        location
+	SideCarImage map[string]string
+	rawManifest  []byte // Content of the manifest file without any transformations.
 
 	parser template.Parser
 	addons addons
@@ -132,6 +152,8 @@ func (w *wkld) StackName() string {
 
 // Parameters returns the list of CloudFormation parameters used by the template.
 func (w *wkld) Parameters() ([]*cloudformation.Parameter, error) {
+	// log.Infoln("direct sidecar images are:", w.SideCarImage)
+	// log.Infoln("run time Image digets are:", w.rc.SideCarImage.SideCarDigests)
 	var img string
 	if w.image != nil {
 		img = w.image.GetLocation()

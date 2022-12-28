@@ -14,7 +14,7 @@ import (
 type ContainerLoginBuildPusher interface {
 	Build(args *dockerengine.BuildArguments) error
 	Login(uri, username, password string) error
-	Push(uri string, tags ...string) (digest string, err error)
+	Push(uri string, sidecarname string, tags ...string) (digest string, err error)
 	IsEcrCredentialHelperEnabled(uri string) bool
 }
 
@@ -73,7 +73,7 @@ func (r *Repository) BuildAndPush(docker ContainerLoginBuildPusher, args *docker
 		}
 	}
 
-	digest, err = docker.Push(args.URI, args.Tags...)
+	digest, err = docker.Push(args.URI, args.Sidecarname, args.Tags...)
 	if err != nil {
 		return "", fmt.Errorf("push to repo %s: %w", r.name, err)
 	}

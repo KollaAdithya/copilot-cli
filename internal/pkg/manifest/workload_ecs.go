@@ -252,19 +252,23 @@ func (lc *Logging) GetEnableMetadata() *string {
 
 // SidecarConfig represents the configurable options for setting up a sidecar container.
 type SidecarConfig struct {
-	Port          *string                      `yaml:"port"`
-	Image         *string                      `yaml:"image"`
-	SImage        Union[*string, SBuildConfig] `yaml:"simage"`
-	Essential     *bool                        `yaml:"essential"`
-	CredsParam    *string                      `yaml:"credentialsParameter"`
-	Variables     map[string]Variable          `yaml:"variables"`
-	Secrets       map[string]Secret            `yaml:"secrets"`
-	MountPoints   []SidecarMountPoint          `yaml:"mount_points"`
-	DockerLabels  map[string]string            `yaml:"labels"`
-	DependsOn     DependsOn                    `yaml:"depends_on"`
-	HealthCheck   ContainerHealthCheck         `yaml:"healthcheck"`
+	Port          *string                     `yaml:"port"`
+	Image         *string                     `yaml:"image"`
+	SImage        Union[string, SBuildConfig] `yaml:"simage"`
+	Essential     *bool                       `yaml:"essential"`
+	CredsParam    *string                     `yaml:"credentialsParameter"`
+	Variables     map[string]Variable         `yaml:"variables"`
+	Secrets       map[string]Secret           `yaml:"secrets"`
+	MountPoints   []SidecarMountPoint         `yaml:"mount_points"`
+	DockerLabels  map[string]string           `yaml:"labels"`
+	DependsOn     DependsOn                   `yaml:"depends_on"`
+	HealthCheck   ContainerHealthCheck        `yaml:"healthcheck"`
 	ImageOverride `yaml:",inline"`
 }
+
+// func (s ) GetDirectSideCarImage() map[string]string {
+// 	return *s.SImage.Basic
+// }
 
 type SBuildConfig struct {
 	Build Union[*string, DockerBuildArgs] `yaml:"build"`
@@ -410,12 +414,12 @@ func (s *SidecarConfig) context() string {
 }
 
 func requiresSidecarBuild(s *SidecarConfig) (bool, error) {
-	noBuild, noURL := s.SImage.Advanced.Build.IsZero(), s.SImage.Basic == nil
+	noBuild, noURL := s.SImage.Advanced.Build.IsZero(), s.SImage.Basic == ""
 	// Error if both of them are specified or neither is specified.
 	if noBuild == noURL {
 		return false, fmt.Errorf(`either "image.build" or "image.location" needs to be specified in the manifest`)
 	}
-	if s.SImage.Basic == nil {
+	if s.SImage.Basic == "" {
 		return true, nil
 	}
 	return false, nil

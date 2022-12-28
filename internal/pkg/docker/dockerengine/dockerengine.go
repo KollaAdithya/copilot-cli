@@ -58,14 +58,15 @@ func New(cmd Cmd) CmdClient {
 
 // BuildArguments holds the arguments that can be passed while building a container.
 type BuildArguments struct {
-	URI        string            // Required. Location of ECR Repo. Used to generate image name in conjunction with tag.
-	Tags       []string          // Optional. List of tags to apply to the image besides "latest".
-	Dockerfile string            // Required. Dockerfile to pass to `docker build` via --file flag.
-	Context    string            // Optional. Build context directory to pass to `docker build`.
-	Target     string            // Optional. The target build stage to pass to `docker build`.
-	CacheFrom  []string          // Optional. Images to consider as cache sources to pass to `docker build`
-	Platform   string            // Optional. OS/Arch to pass to `docker build`.
-	Args       map[string]string // Optional. Build args to pass via `--build-arg` flags. Equivalent to ARG directives in dockerfile.
+	Sidecarname string
+	URI         string            // Required. Location of ECR Repo. Used to generate image name in conjunction with tag.
+	Tags        []string          // Optional. List of tags to apply to the image besides "latest".
+	Dockerfile  string            // Required. Dockerfile to pass to `docker build` via --file flag.
+	Context     string            // Optional. Build context directory to pass to `docker build`.
+	Target      string            // Optional. The target build stage to pass to `docker build`.
+	CacheFrom   []string          // Optional. Images to consider as cache sources to pass to `docker build`
+	Platform    string            // Optional. OS/Arch to pass to `docker build`.
+	Args        map[string]string // Optional. Build args to pass via `--build-arg` flags. Equivalent to ARG directives in dockerfile.
 }
 
 type dockerConfig struct {
@@ -87,7 +88,9 @@ func (c CmdClient) Build(in *BuildArguments) error {
 	for _, tag := range in.Tags {
 		args = append(args, "-t", imageName(in.URI, tag))
 	}
-
+	if in.Sidecarname != "" {
+		args = append(args, "-t", fmt.Sprintf("%s:%s-%s", in.URI, in.Sidecarname, "latest"))
+	}
 	// Add cache from options.
 	for _, imageFrom := range in.CacheFrom {
 		args = append(args, "--cache-from", imageFrom)
@@ -145,10 +148,16 @@ func (c CmdClient) Login(uri, username, password string) error {
 }
 
 // Push pushes the images with the specified tags and ecr repository URI, and returns the image digest on success.
-func (c CmdClient) Push(uri string, tags ...string) (digest string, err error) {
-	images := []string{uri}
+func (c CmdClient) Push(uri string, sidecarname string, tags ...string) (digest string, err error) {
+	images := []string{}
+	if sidecarname == "" {
+		images = []string{uri}
+	}
 	for _, tag := range tags {
 		images = append(images, imageName(uri, tag))
+	}
+	if sidecarname != "" {
+		images = append(images, fmt.Sprintf("%s:%s-%s", uri, sidecarname, "latest"))
 	}
 	var args []string
 	if ci, _ := c.lookupEnv("CI"); ci == "true" {

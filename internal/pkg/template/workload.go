@@ -129,6 +129,7 @@ type WorkloadNestedStackOpts struct {
 type SidecarOpts struct {
 	Name                 string
 	Image                *string
+	SImage               *string
 	Essential            *bool
 	Port                 *string
 	Protocol             *string

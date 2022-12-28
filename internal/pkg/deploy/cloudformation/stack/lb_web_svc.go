@@ -90,15 +90,16 @@ func NewLoadBalancedWebService(conf LoadBalancedWebServiceConfig,
 	s := &LoadBalancedWebService{
 		ecsWkld: &ecsWkld{
 			wkld: &wkld{
-				name:        aws.StringValue(conf.Manifest.Name),
-				env:         aws.StringValue(conf.EnvManifest.Name),
-				app:         conf.App.Name,
-				permBound:   conf.App.PermissionsBoundary,
-				rc:          conf.RuntimeConfig,
-				image:       conf.Manifest.ImageConfig.Image,
-				rawManifest: conf.RawManifest,
-				parser:      parser,
-				addons:      conf.Addons,
+				name:         aws.StringValue(conf.Manifest.Name),
+				env:          aws.StringValue(conf.EnvManifest.Name),
+				app:          conf.App.Name,
+				permBound:    conf.App.PermissionsBoundary,
+				rc:           conf.RuntimeConfig,
+				image:        conf.Manifest.ImageConfig.Image,
+				SideCarImage: conf.Manifest.GetAllSidecarImages(),
+				rawManifest:  conf.RawManifest,
+				parser:       parser,
+				addons:       conf.Addons,
 			},
 			logRetention:        conf.Manifest.Logging.Retention,
 			tc:                  conf.Manifest.TaskConfig,
@@ -131,7 +132,7 @@ func (s *LoadBalancedWebService) Template() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sidecars, err := convertSidecar(s.manifest.Sidecars)
+	sidecars, err := convertSidecar(s.manifest.Sidecars, s.ecsWkld.wkld.rc.SideCarImage)
 	if err != nil {
 		return "", fmt.Errorf("convert the sidecar configuration for service %s: %w", s.name, err)
 	}

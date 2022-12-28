@@ -523,10 +523,11 @@ func NewWorkerSvcDeployer(in *WorkloadDeployerInput) (*workerSvcDeployer, error)
 
 // UploadArtifactsOutput is the output of UploadArtifacts.
 type UploadArtifactsOutput struct {
-	ImageDigest        *string
-	EnvFileARN         string
-	AddonsURL          string
-	CustomResourceURLs map[string]string
+	ImageDigest         *string
+	SidecarImageDigests map[string]string
+	EnvFileARN          string
+	AddonsURL           string
+	CustomResourceURLs  map[string]string
 }
 
 // StackRuntimeConfiguration contains runtime configuration for a workload CloudFormation stack.
@@ -534,12 +535,13 @@ type StackRuntimeConfiguration struct {
 	// Use *string for three states (see https://github.com/aws/copilot-cli/pull/3268#discussion_r806060230)
 	// This is mainly to keep the `workload package` behavior backward-compatible, otherwise our old pipeline buildspec would break,
 	// since previously we parsed the env region from a mock ECR URL that we generated from `workload package``.
-	ImageDigest        *string
-	EnvFileARN         string
-	AddonsURL          string
-	RootUserARN        string
-	Tags               map[string]string
-	CustomResourceURLs map[string]string
+	ImageDigest         *string
+	SidecarImageDigests map[string]string
+	EnvFileARN          string
+	AddonsURL           string
+	RootUserARN         string
+	Tags                map[string]string
+	CustomResourceURLs  map[string]string
 }
 
 // DeployWorkloadInput is the input of DeployWorkload.
@@ -931,9 +933,10 @@ func (d *workloadDeployer) uploadArtifacts(customResources customResourcesFunc) 
 	}
 
 	out := &UploadArtifactsOutput{
-		ImageDigest: imageDigest,
-		EnvFileARN:  s3Artifacts.envFileARN,
-		AddonsURL:   s3Artifacts.addonsURL,
+		ImageDigest:         imageDigest,
+		SidecarImageDigests: sidecarImageDigests,
+		EnvFileARN:          s3Artifacts.envFileARN,
+		AddonsURL:           s3Artifacts.addonsURL,
 	}
 	crs, err := customResources(d.templateFS)
 	if err != nil {
@@ -1039,6 +1042,10 @@ func (d *workloadDeployer) runtimeConfig(in *StackRuntimeConfiguration) (*stack.
 			RepoURL:  d.resources.RepositoryURLs[d.name],
 			ImageTag: d.imageTag,
 			Digest:   aws.StringValue(in.ImageDigest),
+		},
+		SideCarImage: &stack.SideCarECRImage{
+			RepoURL:        d.resources.RepositoryURLs[d.name],
+			SideCarDigests: in.SidecarImageDigests,
 		},
 		ServiceDiscoveryEndpoint: endpoint,
 		AccountID:                d.env.AccountID,
@@ -1262,13 +1269,14 @@ func buildArgs(name, imageTag, workspacePath string, unmarshaledManifest interfa
 	}
 	args := mf.BuildArgs(workspacePath)
 	return &dockerengine.BuildArguments{
-		Dockerfile: *args.Dockerfile,
-		Context:    *args.Context,
-		Args:       args.Args,
-		CacheFrom:  args.CacheFrom,
-		Target:     aws.StringValue(args.Target),
-		Platform:   mf.ContainerPlatform(),
-		Tags:       tags,
+		Sidecarname: "",
+		Dockerfile:  *args.Dockerfile,
+		Context:     *args.Context,
+		Args:        args.Args,
+		CacheFrom:   args.CacheFrom,
+		Target:      aws.StringValue(args.Target),
+		Platform:    mf.ContainerPlatform(),
+		Tags:        tags,
 	}, nil
 }
 
@@ -1285,12 +1293,13 @@ func buildSidecarArgs(name, workspacePath string, unmarshaledManifest interface{
 	deBuildArguments := make(map[string]*dockerengine.BuildArguments)
 	for k, v := range args {
 		deBuildArguments[k] = &dockerengine.BuildArguments{
-			Dockerfile: *v.Dockerfile,
-			Context:    *v.Context,
-			Args:       v.Args,
-			CacheFrom:  v.CacheFrom,
-			Target:     aws.StringValue(v.Target),
-			Platform:   mf.ContainerPlatform(),
+			Sidecarname: k,
+			Dockerfile:  *v.Dockerfile,
+			Context:     *v.Context,
+			Args:        v.Args,
+			CacheFrom:   v.CacheFrom,
+			Target:      aws.StringValue(v.Target),
+			Platform:    mf.ContainerPlatform(),
 		}
 	}
 	return deBuildArguments, nil
