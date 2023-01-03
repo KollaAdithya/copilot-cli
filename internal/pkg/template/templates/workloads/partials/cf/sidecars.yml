@@ -40,7 +40,8 @@
 {{- end}}
 {{- range $sidecar := .Sidecars}}
 - Name: {{$sidecar.Name}}
-  Image: {{$sidecar.Image}}
+  #Image: {{$sidecar.Image}}
+  Image: {{$sidecar.SImage}}
 {{- if $sidecar.Essential}}
   Essential: {{$sidecar.Essential}}
 {{- end}}

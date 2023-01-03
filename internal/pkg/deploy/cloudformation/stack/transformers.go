@@ -15,7 +15,6 @@ import (
 	"github.com/aws/copilot-cli/internal/pkg/aws/partitions"
 	"github.com/aws/copilot-cli/internal/pkg/deploy"
 	"github.com/aws/copilot-cli/internal/pkg/template/override"
-	"github.com/aws/copilot-cli/internal/pkg/term/log"
 
 	"github.com/aws/copilot-cli/internal/pkg/aws/s3"
 
@@ -123,9 +122,9 @@ func convertSidecar(s map[string]*manifest.SidecarConfig, scImage *SideCarECRIma
 			Command:      command,
 		})
 	}
-	for _, v := range sidecars {
-		log.Infoln("Sidecar Image digests or Direcr Image:", *v.SImage)
-	}
+	// for _, v := range sidecars {
+	// 	log.Infoln("Sidecar Image digests or Direcr Image:", *v.SImage)
+	// }
 	return sidecars, nil
 }
 
