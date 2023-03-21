@@ -7,13 +7,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/aws/copilot-cli/internal/pkg/aws/partitions"
 	"github.com/aws/copilot-cli/internal/pkg/aws/s3"
 	"github.com/aws/copilot-cli/internal/pkg/template/artifactpath"
 	"golang.org/x/mod/semver"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ssm"
@@ -521,7 +522,7 @@ func (o *runTaskOpts) validateEnvCompatibilityForGenerateJobCmd(app, env string)
 	if err != nil {
 		return fmt.Errorf("retrieve version of environment stack %q in application %q: %v", env, app, err)
 	}
-	// The '--generate-cmd' flag was introduced in env v1.4.0. In env v1.8.0, EnvManagerRole took over, but 
+	// The '--generate-cmd' flag was introduced in env v1.4.0. In env v1.8.0, EnvManagerRole took over, but
 	//"states:DescribeStateMachine" permissions weren't added until 1.12.2.
 	if semver.Compare(version, "v1.12.2") < 0 {
 		return &errFeatureIncompatibleWithEnvironment{
@@ -963,7 +964,7 @@ func (o *runTaskOpts) buildAndPushImage() error {
 		Dockerfile: o.dockerfilePath,
 		Context:    ctx,
 		Tags:       append([]string{imageTagLatest}, additionalTags...),
-	}); err != nil {
+	}, os.Stdout); err != nil {
 		return fmt.Errorf("build and push image: %w", err)
 	}
 	return nil

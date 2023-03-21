@@ -39,8 +39,10 @@ func NewCmd() *Cmd {
 	return &Cmd{
 		command: func(name string, args []string, opts ...CmdOption) cmdRunner {
 			cmd := exec.Command(name, args...)
-			cmd.Stdout = os.Stderr
-			cmd.Stderr = os.Stderr
+			if len(opts) == 0 {
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+			}
 			for _, opt := range opts {
 				opt(cmd)
 			}

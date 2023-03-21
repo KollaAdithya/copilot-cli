@@ -6,15 +6,16 @@ package repository
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/aws/copilot-cli/internal/pkg/docker/dockerengine"
 )
 
 // ContainerLoginBuildPusher provides support for logging in to repositories, building images and pushing images to repositories.
 type ContainerLoginBuildPusher interface {
-	Build(args *dockerengine.BuildArguments) error
+	Build(args *dockerengine.BuildArguments, writer io.Writer) error
 	Login(uri, username, password string) error
-	Push(uri string, tags ...string) (digest string, err error)
+	Push(uri string, writer io.Writer, tags ...string) (digest string, err error)
 	IsEcrCredentialHelperEnabled(uri string) bool
 }
 
@@ -49,7 +50,7 @@ func NewWithURI(registry Registry, name, uri string) *Repository {
 }
 
 // BuildAndPush builds the image from Dockerfile and pushes it to the repository with tags.
-func (r *Repository) BuildAndPush(docker ContainerLoginBuildPusher, args *dockerengine.BuildArguments) (digest string, err error) {
+func (r *Repository) BuildAndPush(docker ContainerLoginBuildPusher, args *dockerengine.BuildArguments, writer io.Writer) (digest string, err error) {
 	if args.URI == "" {
 		uri, err := r.URI()
 		if err != nil {
@@ -57,7 +58,7 @@ func (r *Repository) BuildAndPush(docker ContainerLoginBuildPusher, args *docker
 		}
 		args.URI = uri
 	}
-	if err := docker.Build(args); err != nil {
+	if err := docker.Build(args, writer); err != nil {
 		return "", fmt.Errorf("build Dockerfile at %s: %w", args.Dockerfile, err)
 	}
 
@@ -73,7 +74,7 @@ func (r *Repository) BuildAndPush(docker ContainerLoginBuildPusher, args *docker
 		}
 	}
 
-	digest, err = docker.Push(args.URI, args.Tags...)
+	digest, err = docker.Push(args.URI, writer, args.Tags...)
 	if err != nil {
 		return "", fmt.Errorf("push to repo %s: %w", r.name, err)
 	}

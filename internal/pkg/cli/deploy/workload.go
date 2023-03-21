@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -35,6 +37,7 @@ import (
 	"github.com/aws/copilot-cli/internal/pkg/template"
 	"github.com/aws/copilot-cli/internal/pkg/template/artifactpath"
 	"github.com/aws/copilot-cli/internal/pkg/term/color"
+	"github.com/aws/copilot-cli/internal/pkg/term/cursor"
 	"github.com/aws/copilot-cli/internal/pkg/term/log"
 	termprogress "github.com/aws/copilot-cli/internal/pkg/term/progress"
 	"github.com/aws/copilot-cli/internal/pkg/workspace"
@@ -55,7 +58,7 @@ type ActionRecommender interface {
 }
 
 type imageBuilderPusher interface {
-	BuildAndPush(docker repository.ContainerLoginBuildPusher, args *dockerengine.BuildArguments) (string, error)
+	BuildAndPush(docker repository.ContainerLoginBuildPusher, args *dockerengine.BuildArguments, writer io.Writer) (string, error)
 }
 
 type templater interface {
@@ -314,6 +317,45 @@ func (d *workloadDeployer) forceDeploy(in *forceDeployInput) error {
 	return nil
 }
 
+type myBuf struct {
+	container string
+	bufMu     sync.Mutex
+	buf       bytes.Buffer
+	doneMu    sync.Mutex
+	done      bool
+}
+
+func (b *myBuf) Write(p []byte) (n int, err error) {
+	b.bufMu.Lock()
+	defer b.bufMu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *myBuf) logs() [6]string {
+	b.bufMu.Lock()
+	defer b.bufMu.Unlock()
+
+	// Split the buffer bytes into lines
+	lines := strings.Split(strings.TrimSpace(b.buf.String()), "\n")
+
+	// Determine the start and end index to extract last 6 lines
+	start := 0
+	if len(lines) > 6 {
+		start = len(lines) - 6
+	}
+	end := len(lines)
+
+	// Extract the last 6 lines and store them in a string slice
+	var logLines [6]string
+	logIdx := 0
+	for start < end {
+		logLines[logIdx] = strings.TrimSpace(lines[start])
+		logIdx++
+		start++
+	}
+	return logLines
+}
+
 func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPusher) (*string, map[string]string, error) {
 	required, err := manifest.DockerfileBuildRequired(d.mft)
 	if err != nil {
@@ -330,30 +372,78 @@ func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPus
 		if err != nil {
 			return nil, nil, err
 		}
-		digest, err = imgBuilderPusher.BuildAndPush(dockerengine.New(exec.NewCmd()), buildArg)
+		digest, err = imgBuilderPusher.BuildAndPush(dockerengine.New(exec.NewCmd()), buildArg, os.Stdout)
 		if err != nil {
 			return nil, nil, fmt.Errorf("build and push main container image: %w", err)
 		}
 	}
+
 	args := scBuildArgs(d.name, d.gitTag, UUIDTag, d.workspacePath, d.mft)
+	buffers := make([]*myBuf, len(args))
 	scDigests := make(map[string]string, len(args))
 	ctx := context.Background()
 	g, _ := errgroup.WithContext(ctx)
+	count := 0
 	for k, v := range args {
 		scName := k
 		dArgs := v
+		pr, pw := io.Pipe()
+		buf := &myBuf{
+			container: scName,
+		}
+		buffers[count] = buf
+		count++
+		// curs := cursor.New()
+		// curs.Hide()
+		// defer curs.Show()
 		g.Go(func() error {
-			scDigests[scName], err = imgBuilderPusher.BuildAndPush(dockerengine.New(exec.NewCmd()), dArgs)
+			defer pw.Close()
+			scDigests[scName], err = imgBuilderPusher.BuildAndPush(dockerengine.New(exec.NewCmd()), dArgs, pw)
 			if err != nil {
 				return err
 			}
 			return nil
 		})
+
+		g.Go(func() error {
+			defer func() {
+				buf.doneMu.Lock()
+				buf.done = true
+				buf.doneMu.Unlock()
+			}()
+			_, err := io.Copy(buf, pr)
+			if err == io.EOF {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			return nil
+		})
 	}
+	g.Go(func() error {
+		for {
+			allDone := true
+			for _, buf := range buffers {
+				buf.doneMu.Lock()
+				if !buf.done {
+					allDone = false
+				}
+				buf.doneMu.Unlock()
+				lines := buf.logs()
+				fmt.Printf("Last 6 lines of %s:\n", buf.container)
+				fmt.Printf("\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4], lines[5])
+			}
+			time.Sleep(60 * time.Millisecond)
+			cursor.EraseLinesAbove(os.Stderr, 7*len(buffers))
+			if allDone {
+				break
+			}
+		}
+		return nil
+	})
 	if err := g.Wait(); err != nil {
 		return nil, nil, err
 	}
-	// The below if loop is for simple test cases.
 	if !required {
 		return nil, scDigests, nil
 	}
