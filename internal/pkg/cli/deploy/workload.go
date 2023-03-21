@@ -375,6 +375,9 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 		return nil
 	}
 	out.ImageDigests = make(map[string]ContainerImageIdentifier, len(buildArgsPerContainer))
+	if err := LoginToDockerClient(d.repository); err != nil {
+		return err
+	}
 	for name, buildArgs := range buildArgsPerContainer {
 		digest, err := d.repository.BuildAndPush(d.dockerCmdClient, buildArgs)
 		if err != nil {
