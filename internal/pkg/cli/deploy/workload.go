@@ -331,7 +331,7 @@ func (b *myBuf) Write(p []byte) (n int, err error) {
 	return b.buf.Write(p)
 }
 
-func (b *myBuf) logs() [6]string {
+func (b *myBuf) logs() []string {
 	b.bufMu.Lock()
 	defer b.bufMu.Unlock()
 
@@ -346,11 +346,9 @@ func (b *myBuf) logs() [6]string {
 	end := len(lines)
 
 	// Extract the last 6 lines and store them in a string slice
-	var logLines [6]string
-	logIdx := 0
+	var logLines []string
 	for start < end {
-		logLines[logIdx] = strings.TrimSpace(lines[start])
-		logIdx++
+		logLines = append(logLines, strings.TrimSpace(lines[start]))
 		start++
 	}
 	return logLines
@@ -393,9 +391,9 @@ func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPus
 		}
 		buffers[count] = buf
 		count++
-		// curs := cursor.New()
-		// curs.Hide()
-		// defer curs.Show()
+		curs := cursor.New()
+		curs.Hide()
+		defer curs.Show()
 		g.Go(func() error {
 			defer pw.Close()
 			scDigests[scName], err = imgBuilderPusher.BuildAndPush(dockerengine.New(exec.NewCmd()), dArgs, pw)
@@ -423,6 +421,7 @@ func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPus
 	g.Go(func() error {
 		for {
 			allDone := true
+			i := 0
 			for _, buf := range buffers {
 				buf.doneMu.Lock()
 				if !buf.done {
@@ -430,11 +429,14 @@ func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPus
 				}
 				buf.doneMu.Unlock()
 				lines := buf.logs()
-				fmt.Printf("Last 6 lines of %s:\n", buf.container)
-				fmt.Printf("\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4], lines[5])
+				if len(lines) >= 6 {
+					i++
+					fmt.Fprintf(os.Stdout, "Displaying last 6 lines of %s\n", buf.container)
+					fmt.Fprintf(os.Stdout, "\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4], lines[5])
+				}
 			}
 			time.Sleep(60 * time.Millisecond)
-			cursor.EraseLinesAbove(os.Stderr, 7*len(buffers))
+			cursor.EraseLinesAbove(os.Stdout, 7*i)
 			if allDone {
 				break
 			}
