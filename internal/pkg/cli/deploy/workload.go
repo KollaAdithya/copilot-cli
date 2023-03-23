@@ -331,13 +331,16 @@ func (b *myBuf) Write(p []byte) (n int, err error) {
 	return b.buf.Write(p)
 }
 
-func (b *myBuf) logs() []string {
+func (b *myBuf) logs() (string, []string) {
 	b.bufMu.Lock()
 	defer b.bufMu.Unlock()
 
 	// Split the buffer bytes into lines
 	lines := strings.Split(strings.TrimSpace(b.buf.String()), "\n")
-
+	var label string
+	if len(lines) >= 1 {
+		label = lines[0]
+	}
 	// Determine the start and end index to extract last 6 lines
 	start := 0
 	if len(lines) > 6 {
@@ -351,7 +354,7 @@ func (b *myBuf) logs() []string {
 		logLines = append(logLines, strings.TrimSpace(lines[start]))
 		start++
 	}
-	return logLines
+	return label, logLines
 }
 
 func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPusher) (*string, map[string]string, error) {
@@ -428,11 +431,11 @@ func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPus
 					allDone = false
 				}
 				buf.doneMu.Unlock()
-				lines := buf.logs()
+				label, lines := buf.logs()
 				if len(lines) >= 6 {
 					i++
-					fmt.Fprintf(os.Stdout, "Displaying last 6 lines of %s\n", buf.container)
-					fmt.Fprintf(os.Stdout, "\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4], lines[5])
+					fmt.Fprintln(os.Stdout, label)
+					fmt.Fprintf(os.Stdout, "\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4])
 				}
 			}
 			time.Sleep(60 * time.Millisecond)
