@@ -375,10 +375,6 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 		return nil
 	}
 	out.ImageDigests = make(map[string]ContainerImageIdentifier, len(buildArgsPerContainer))
-	dockerCmdClient := dockerengine.New(exec.NewCmd())
-	if err := d.repository.Login(dockerCmdClient); err != nil {
-		return fmt.Errorf("login to docker: %w", err)
-	}
 	for name, buildArgs := range buildArgsPerContainer {
 		digest, err := d.repository.BuildAndPush(d.dockerCmdClient, buildArgs)
 		if err != nil {
@@ -393,23 +389,7 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	return nil
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 func buildArgsPerContainer(name, workspacePath, uri string, img ContainerImageIdentifier, unmarshaledManifest interface{}) (map[string]*dockerengine.BuildArguments, error) {
-=======
-// loginToDockerClient logs in to the Docker client using the provided RepositoryService.
-// Returns an error if any error occurs during the login process.
-func loginToDockerClient(rs repositoryService) error {
-	if err := rs.Login(dockerengine.New(exec.NewCmd())); err != nil {
-		return fmt.Errorf("login to docker: %w", err)
-	}
-	return nil
-}
-
-=======
->>>>>>> b85f5103 (reuse docker command client)
-func buildArgsPerContainer(name, workspacePath string, img ContainerImageIdentifier, unmarshaledManifest interface{}) (map[string]*dockerengine.BuildArguments, error) {
->>>>>>> 5e05484b (Address Penghao's fb:  make  private and remove URI())
 	type dfArgs interface {
 		BuildArgs(rootDirectory string) (map[string]*manifest.DockerBuildArgs, error)
 		ContainerPlatform() string
