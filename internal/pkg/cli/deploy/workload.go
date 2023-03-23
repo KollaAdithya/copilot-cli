@@ -434,15 +434,15 @@ func (d *workloadDeployer) uploadContainerImage(imgBuilderPusher imageBuilderPus
 				label, lines := buf.logs()
 				if len(lines) >= 6 {
 					i++
-					fmt.Fprintln(os.Stdout, label)
-					fmt.Fprintf(os.Stdout, "\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4])
+					fmt.Fprintln(os.Stderr, label)
+					fmt.Fprintf(os.Stderr, "\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4])
 				}
 			}
-			time.Sleep(60 * time.Millisecond)
-			cursor.EraseLinesAbove(os.Stdout, 7*i)
 			if allDone {
 				break
 			}
+			time.Sleep(60 * time.Millisecond)
+			// cursor.EraseLinesAbove(os.Stderr, 7*i)
 		}
 		return nil
 	})
