@@ -5,12 +5,15 @@ package deploy
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -35,11 +38,13 @@ import (
 	"github.com/aws/copilot-cli/internal/pkg/template/artifactpath"
 	"github.com/aws/copilot-cli/internal/pkg/template/diff"
 	"github.com/aws/copilot-cli/internal/pkg/term/color"
+	"github.com/aws/copilot-cli/internal/pkg/term/cursor"
 	"github.com/aws/copilot-cli/internal/pkg/term/log"
 	termprogress "github.com/aws/copilot-cli/internal/pkg/term/progress"
 	"github.com/aws/copilot-cli/internal/pkg/version"
 	"github.com/aws/copilot-cli/internal/pkg/workspace"
 	"github.com/spf13/afero"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -70,7 +75,7 @@ func (noopActionRecommender) RecommendedActions() []string {
 
 type repositoryService interface {
 	Login(docker repository.ContainerLoginBuildPusher) (string, error)
-	BuildAndPush(docker repository.ContainerLoginBuildPusher, args *dockerengine.BuildArguments) (string, error)
+	BuildAndPush(docker repository.ContainerLoginBuildPusher, args *dockerengine.BuildArguments, w io.Writer) (string, error)
 }
 
 type templater interface {
@@ -365,6 +370,55 @@ func (img ContainerImageIdentifier) Tag() string {
 	return img.GitShortCommitTag
 }
 
+// buildPushOutputBuffer contains the output configuration for docker build and push.
+type buildPushOutputBuffer struct {
+	ContainerName string // ContainerName is the name of the container.
+
+	bufMu sync.Mutex // bufMu is a mutex to protect access to the buffer.
+
+	buf bytes.Buffer // buf is the buffer containing the output of build and push.
+
+	doneMu sync.Mutex // doneMu is a mutex to protect access to the done field.
+
+	done bool // done is a flag indicating whether the build and push
+}
+
+// Write appends the given bytes to the buffer.
+func (b *buildPushOutputBuffer) Write(p []byte) (n int, err error) {
+	b.bufMu.Lock()
+	defer b.bufMu.Unlock()
+	return b.buf.Write(p)
+}
+
+// logs returns the label (i.e., the first line of the buffer) and the last five lines of the buffer.
+func (b *buildPushOutputBuffer) logs() (string, [5]string) {
+	b.bufMu.Lock()
+	defer b.bufMu.Unlock()
+
+	// Split the buffer bytes into lines
+	lines := strings.Split(strings.TrimSpace(b.buf.String()), "\n")
+	var label string
+	if len(lines) >= 1 {
+		label = lines[0]
+	}
+	// Determine the start and end index to extract last 5 lines
+	start := 1
+	if len(lines) > 5 {
+		start = len(lines) - 5
+	}
+	end := len(lines)
+
+	// Extract the last 5 lines and store them in a fixed-size array
+	var logLines [5]string
+	i := 0
+	for start < end {
+		logLines[i] = strings.TrimSpace(lines[start])
+		start++
+		i++
+	}
+	return label, logLines
+}
+
 func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) error {
 	// If it is built from local Dockerfile, build and push to the ECR repo.
 	buildArgsPerContainer, err := buildArgsPerContainer(d.name, d.workspacePath, d.uri, d.image, d.mft)
@@ -375,16 +429,112 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 		return nil
 	}
 	out.ImageDigests = make(map[string]ContainerImageIdentifier, len(buildArgsPerContainer))
+	// create an array of output buffers, one for each container.
+	buffers := make([]*buildPushOutputBuffer, len(buildArgsPerContainer))
+
+	// create a context and an error group.
+	ctx := context.Background()
+	g, _ := errgroup.WithContext(ctx)
+
+	// counter for indexing the output buffers.
+	count := 0
+
 	for name, buildArgs := range buildArgsPerContainer {
-		digest, err := d.repository.BuildAndPush(d.dockerCmdClient, buildArgs)
-		if err != nil {
-			return fmt.Errorf("build and push image: %w", err)
+		// create a copy of loop variables to avoid data race.
+		name := name
+		buildArgs := buildArgs
+
+		// create a pipe for streaming the build and push output.
+		pr, pw := io.Pipe()
+
+		buffer := &buildPushOutputBuffer{
+			ContainerName: name,
 		}
-		out.ImageDigests[name] = ContainerImageIdentifier{
-			Digest:            digest,
-			CustomTag:         d.image.CustomTag,
-			GitShortCommitTag: d.image.GitShortCommitTag,
+		buffers[count] = buffer
+		count++
+
+		// create a new cursor and hide it.
+		curs := cursor.New()
+		curs.Hide()
+		defer curs.Show()
+
+		// create a mutex for synchronizing access to the output map.
+		var mux sync.Mutex
+		g.Go(func() error {
+			defer pw.Close()
+			digest, err := d.repository.BuildAndPush(d.dockerCmdClient, buildArgs, pw)
+			if err != nil {
+				return fmt.Errorf("error building and pushing image for container %q: %w", name, err)
+			}
+			mux.Lock()
+			defer mux.Unlock()
+			out.ImageDigests[name] = ContainerImageIdentifier{
+				Digest:            digest,
+				CustomTag:         d.image.CustomTag,
+				GitShortCommitTag: d.image.GitShortCommitTag,
+			}
+			return nil
+		})
+
+		// start a goroutine for copying the build and push output to the output buffer.
+		g.Go(func() error {
+			return copyOutputToBuffer(pr, buffer)
+		})
+	}
+
+	// start a goroutine for printing the build and push output for all containers.
+	g.Go(func() error {
+		return printOutputFromBuffers(buffers)
+	})
+
+	// wait for all goroutines to complete and return any errors.
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func copyOutputToBuffer(pr io.Reader, buffer *buildPushOutputBuffer) error {
+	defer func() {
+		buffer.doneMu.Lock()
+		buffer.done = true
+		buffer.doneMu.Unlock()
+	}()
+
+	// copy the build and push output to the output buffer
+	_, err := io.Copy(buffer, pr)
+	if err == io.EOF {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("copying build and push output for container %q: %w", buffer.ContainerName, err)
+	}
+	return nil
+}
+
+func printOutputFromBuffers(buffers []*buildPushOutputBuffer) error {
+	for {
+		allDone := true
+		for _, buf := range buffers {
+			buf.doneMu.Lock()
+			if !buf.done {
+				allDone = false
+			}
+			buf.doneMu.Unlock()
+
+			// get the label and lines for the output buffer
+			label, lines := buf.logs()
+
+			// print the output to stderr
+			fmt.Fprintln(os.Stderr, label)
+			fmt.Fprintf(os.Stderr, "\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4])
 		}
+		if allDone {
+			break
+		}
+
+		// sleep for a short time and erase the previous output
+		time.Sleep(60 * time.Millisecond)
+		cursor.EraseLinesAbove(os.Stderr, 7*len(buffers))
 	}
 	return nil
 }
