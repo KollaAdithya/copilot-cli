@@ -62,6 +62,13 @@ const (
 	labelForContainerName = "com.aws.copilot.image.container.name"
 )
 
+const (
+	// pollInterval is the time Interval to wait between checking whether the output buffers are done.
+	pollInterval        = 60 * time.Millisecond
+	maxLogLines         = 5
+	eraselinesPerBuffer = 7
+)
+
 // ActionRecommender contains methods that output action recommendation.
 type ActionRecommender interface {
 	RecommendedActions() []string
@@ -380,7 +387,7 @@ type buildPushOutputBuffer struct {
 
 	doneMu sync.Mutex // doneMu is a mutex to protect access to the done field.
 
-	done bool // done is a flag indicating whether the build and push
+	done bool // done is a flag indicating whether the build and push is completed.
 }
 
 // Write appends the given bytes to the buffer.
@@ -391,7 +398,7 @@ func (b *buildPushOutputBuffer) Write(p []byte) (n int, err error) {
 }
 
 // logs returns the label (i.e., the first line of the buffer) and the last five lines of the buffer.
-func (b *buildPushOutputBuffer) logs() (string, [5]string) {
+func (b *buildPushOutputBuffer) logs() (string, [maxLogLines]string) {
 	b.bufMu.Lock()
 	defer b.bufMu.Unlock()
 
@@ -403,18 +410,18 @@ func (b *buildPushOutputBuffer) logs() (string, [5]string) {
 	}
 	// Determine the start and end index to extract last 5 lines
 	start := 1
-	if len(lines) > 5 {
-		start = len(lines) - 5
+	if len(lines) > maxLogLines {
+		start = len(lines) - maxLogLines
 	}
 	end := len(lines)
 
 	// Extract the last 5 lines and store them in a fixed-size array
-	var logLines [5]string
-	i := 0
+	var logLines [maxLogLines]string
+	idx := 0
 	for start < end {
-		logLines[i] = strings.TrimSpace(lines[start])
+		logLines[idx] = strings.TrimSpace(lines[start])
 		start++
-		i++
+		idx++
 	}
 	return label, logLines
 }
@@ -464,7 +471,7 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 			defer pw.Close()
 			digest, err := d.repository.BuildAndPush(d.dockerCmdClient, buildArgs, pw)
 			if err != nil {
-				return fmt.Errorf("error building and pushing image for container %q: %w", name, err)
+				return fmt.Errorf("build and push image: %w", err)
 			}
 			mux.Lock()
 			defer mux.Unlock()
@@ -476,13 +483,11 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 			return nil
 		})
 
-		// start a goroutine for copying the build and push output to the output buffer.
 		g.Go(func() error {
 			return copyOutputToBuffer(pr, buffer)
 		})
 	}
 
-	// start a goroutine for printing the build and push output for all containers.
 	g.Go(func() error {
 		return printOutputFromBuffers(buffers)
 	})
@@ -494,6 +499,8 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	return nil
 }
 
+// copyOutputToBuffer copies the build and push output from the given io.Reader to the buildPushOutputBuffer buffer.
+// return an error if copying fails or if the reader returns an unexpected error.
 func copyOutputToBuffer(pr io.Reader, buffer *buildPushOutputBuffer) error {
 	defer func() {
 		buffer.doneMu.Lock()
@@ -511,8 +518,12 @@ func copyOutputToBuffer(pr io.Reader, buffer *buildPushOutputBuffer) error {
 	return nil
 }
 
+// printOutputFromBuffers prints the build and push output from the list of buildPushOutputBuffer buffers to stderr.
+// It polls each buffer until all build and push calls are completed,
+// and erases the previous output after sleeping for a short duration.
 func printOutputFromBuffers(buffers []*buildPushOutputBuffer) error {
 	for {
+		// check whether all build and push calls are completed.
 		allDone := true
 		for _, buf := range buffers {
 			buf.doneMu.Lock()
@@ -520,11 +531,7 @@ func printOutputFromBuffers(buffers []*buildPushOutputBuffer) error {
 				allDone = false
 			}
 			buf.doneMu.Unlock()
-
-			// get the label and lines for the output buffer
 			label, lines := buf.logs()
-
-			// print the output to stderr
 			fmt.Fprintln(os.Stderr, label)
 			fmt.Fprintf(os.Stderr, "\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4])
 		}
@@ -532,9 +539,10 @@ func printOutputFromBuffers(buffers []*buildPushOutputBuffer) error {
 			break
 		}
 
-		// sleep for a short time and erase the previous output
-		time.Sleep(60 * time.Millisecond)
-		cursor.EraseLinesAbove(os.Stderr, 7*len(buffers))
+		// sleep for a short time and erase the previous output.
+		time.Sleep(pollInterval)
+		// erase 5 lines from buffer and 2 lines of label.
+		cursor.EraseLinesAbove(os.Stderr, eraselinesPerBuffer*len(buffers))
 	}
 	return nil
 }

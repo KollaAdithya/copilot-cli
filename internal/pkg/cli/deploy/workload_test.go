@@ -210,7 +210,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 						"com.aws.copilot.image.builder":        "copilot-cli",
 						"com.aws.copilot.image.container.name": "mockWkld",
 					},
-				}).Return("", mockError)
+				}, gomock.Any()).Return("", mockError)
 			},
 			wantErr: fmt.Errorf("build and push image: some error"),
 		},
@@ -233,7 +233,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 						"com.aws.copilot.image.builder":        "copilot-cli",
 						"com.aws.copilot.image.container.name": "mockWkld",
 					},
-				}).Return("mockDigest", nil)
+				}, gomock.Any()).Return("mockDigest", nil)
 				m.mockAddons = nil
 			},
 			wantImages: map[string]ContainerImageIdentifier{
@@ -263,7 +263,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 						"com.aws.copilot.image.builder":        "copilot-cli",
 						"com.aws.copilot.image.container.name": "mockWkld",
 					},
-				}).Return("mockDigest", nil)
+				}, gomock.Any()).Return("mockDigest", nil)
 				m.mockAddons = nil
 			},
 			wantImages: map[string]ContainerImageIdentifier{
@@ -295,7 +295,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 						"com.aws.copilot.image.builder":        "copilot-cli",
 						"com.aws.copilot.image.container.name": "nginx",
 					},
-				}).Return("sidecarMockDigest1", nil)
+				}, gomock.Any()).Return("sidecarMockDigest1", nil)
 				m.mockRepositoryService.EXPECT().BuildAndPush(gomock.Any(), &dockerengine.BuildArguments{
 					Dockerfile: "web/Dockerfile",
 					Context:    "Users/bowie",
@@ -305,7 +305,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 						"com.aws.copilot.image.builder":        "copilot-cli",
 						"com.aws.copilot.image.container.name": "logging",
 					},
-				}).Return("sidecarMockDigest2", nil)
+				}, gomock.Any()).Return("sidecarMockDigest2", nil)
 				m.mockAddons = nil
 			},
 			wantImages: map[string]ContainerImageIdentifier{

@@ -762,7 +762,7 @@ func mockHasDefaultCluster(m runTaskMocks) {
 }
 
 func mockRepositoryAnytime(m runTaskMocks) {
-	m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Any()).AnyTimes()
+	m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	m.repository.EXPECT().URI().AnyTimes()
 }
 
@@ -844,7 +844,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 					Command:    []string{},
 					EntryPoint: []string{},
 				}).Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Eq(&defaultBuildArguments))
+				m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Eq(&defaultBuildArguments), gomock.Any())
 				m.repository.EXPECT().URI().Return(mockRepoURI, errors.New("some error"))
 				mockHasDefaultCluster(m)
 			},
@@ -860,7 +860,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 					Command:    []string{},
 					EntryPoint: []string{},
 				}).Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Eq(&defaultBuildArguments))
+				m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Eq(&defaultBuildArguments), gomock.Any())
 				m.repository.EXPECT().URI().Return(mockRepoURI, nil)
 				m.deployer.EXPECT().DeployTask(&deploy.CreateTaskResourcesInput{
 					Name:       inGroupName,
@@ -918,6 +918,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 						Context: filepath.Dir(defaultDockerfilePath),
 						Tags:    []string{imageTagLatest, tag},
 					}),
+					gomock.Any(),
 				)
 				m.repository.EXPECT().URI().AnyTimes()
 				m.runner.EXPECT().Run().AnyTimes()
@@ -935,6 +936,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 						Context: "../../other",
 						Tags:    []string{imageTagLatest},
 					}),
+					gomock.Any(),
 				)
 				m.repository.EXPECT().URI().AnyTimes()
 				m.runner.EXPECT().Run().AnyTimes()
@@ -953,7 +955,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 					Command:    []string{"/bin/sh", "-c", "curl $ECS_CONTAINER_METADATA_URI_V4"},
 					EntryPoint: []string{"exec", "some command"},
 				}).Times(1).Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Eq(&defaultBuildArguments))
+				m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Eq(&defaultBuildArguments), gomock.Any())
 				m.repository.EXPECT().URI().Return(mockRepoURI, nil)
 				m.deployer.EXPECT().DeployTask(&deploy.CreateTaskResourcesInput{
 					Name:       inGroupName,
