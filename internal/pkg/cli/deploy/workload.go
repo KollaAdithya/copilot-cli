@@ -64,9 +64,9 @@ const (
 
 const (
 	// pollInterval is the time Interval to wait between checking whether the output buffers are done.
-	pollInterval        = 60 * time.Millisecond
-	maxLogLines         = 5
-	eraselinesPerBuffer = 7
+	pollInterval          = 60 * time.Millisecond
+	maxLogLines           = 5
+	dockerBuildLabelLines = 2
 )
 
 // ActionRecommender contains methods that output action recommendation.
@@ -446,7 +446,7 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	// counter for indexing the output buffers.
 	count := 0
 
-	// create a mutex for synchronizing access to the output map.
+	// mutex for synchronizing access to the output map.
 	var mux sync.Mutex
 
 	for name, buildArgs := range buildArgsPerContainer {
@@ -500,54 +500,6 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	return nil
 }
 
-// copyOutputToBuffer copies the build and push output from the given io.Reader to the buildPushOutputBuffer buffer.
-// return an error if copying fails or if the reader returns an unexpected error.
-func copyOutputToBuffer(pr io.Reader, buffer *buildPushOutputBuffer) error {
-	defer func() {
-		buffer.doneMu.Lock()
-		buffer.done = true
-		buffer.doneMu.Unlock()
-	}()
-
-	// copy the build and push output to the output buffer
-	_, err := io.Copy(buffer, pr)
-	if err == io.EOF {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("copying build and push output for container %q: %w", buffer.ContainerName, err)
-	}
-	return nil
-}
-
-// printOutputFromBuffers prints the build and push output from the list of buildPushOutputBuffer buffers to stderr.
-// It polls each buffer until all build and push calls are completed,
-// and erases the previous output after sleeping for a short duration.
-func printOutputFromBuffers(buffers []*buildPushOutputBuffer) error {
-	for {
-		// check whether all build and push calls are completed.
-		allDone := true
-		for _, buf := range buffers {
-			buf.doneMu.Lock()
-			if !buf.done {
-				allDone = false
-			}
-			buf.doneMu.Unlock()
-			label, lines := buf.logs()
-			fmt.Fprintln(os.Stderr, label)
-			fmt.Fprintf(os.Stderr, "\t%v\n\t%v\n\t%v\n\t%v\n\t%v\n", lines[0], lines[1], lines[2], lines[3], lines[4])
-		}
-		if allDone {
-			break
-		}
-
-		// sleep for a short time and erase the previous output.
-		time.Sleep(pollInterval)
-		// erase 5 lines from buffer and 2 lines of label.
-		cursor.EraseLinesAbove(os.Stderr, eraselinesPerBuffer*len(buffers))
-	}
-	return nil
-}
-
 func buildArgsPerContainer(name, workspacePath, uri string, img ContainerImageIdentifier, unmarshaledManifest interface{}) (map[string]*dockerengine.BuildArguments, error) {
 	type dfArgs interface {
 		BuildArgs(rootDirectory string) (map[string]*manifest.DockerBuildArgs, error)
@@ -592,6 +544,73 @@ func buildArgsPerContainer(name, workspacePath, uri string, img ContainerImageId
 		}
 	}
 	return dArgs, nil
+}
+
+// copyOutputToBuffer copies the build and push output from the given io.Reader to the buildPushOutputBuffer buffer.
+// return an error if copying fails or if the reader returns an unexpected error.
+func copyOutputToBuffer(pr io.Reader, buffer *buildPushOutputBuffer) error {
+	defer func() {
+		buffer.doneMu.Lock()
+		buffer.done = true
+		buffer.doneMu.Unlock()
+	}()
+
+	// copy the build and push output to the output buffer
+	_, err := io.Copy(buffer, pr)
+	if err == io.EOF {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("copying build and push output for container %q: %w", buffer.ContainerName, err)
+	}
+	return nil
+}
+
+// printOutputFromBuffers prints the build and push output from the list of buildPushOutputBuffer buffers to stderr.
+// It polls each buffer until all build and push calls are completed,
+// and erases the previous output after sleeping for a short duration.
+func printOutputFromBuffers(buffers []*buildPushOutputBuffer) error {
+	for {
+		writtenLines := 0
+		// check whether all build and push calls are completed.
+		allDone := true
+		for _, buf := range buffers {
+			buf.doneMu.Lock()
+			if !buf.done {
+				allDone = false
+			}
+			buf.doneMu.Unlock()
+			label, logs := buf.logs()
+			outputLogs := removeEmptyStrings(logs)
+			if len(outputLogs) > 0 {
+				fmt.Fprintln(os.Stderr, label)
+				for _, logLine := range outputLogs {
+					fmt.Fprintln(os.Stderr, "\t", logLine)
+				}
+				writtenLines = writtenLines + dockerBuildLabelLines + len(outputLogs)
+			}
+		}
+		if allDone {
+			break
+		}
+
+		// sleep for a short time and erase the previous output.
+		time.Sleep(pollInterval)
+		// erase 5 lines from buffer and 2 lines of label.
+		cursor.EraseLinesAbove(os.Stderr, writtenLines)
+	}
+	return nil
+}
+
+// removeEmptyStrings removes empty strings from an array of strings
+// and returns a new array containing only non-empty strings.
+func removeEmptyStrings(arrWithEmptyStrings [maxLogLines]string) []string {
+	var nonEmptyStrings []string
+	for _, s := range arrWithEmptyStrings {
+		if s != "" {
+			nonEmptyStrings = append(nonEmptyStrings, s)
+		}
+	}
+	return nonEmptyStrings
 }
 
 func (d *workloadDeployer) uploadArtifactsToS3(out *UploadArtifactsOutput) error {
