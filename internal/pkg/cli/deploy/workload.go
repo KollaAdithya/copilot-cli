@@ -446,6 +446,9 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	// counter for indexing the output buffers.
 	count := 0
 
+	// create a mutex for synchronizing access to the output map.
+	var mux sync.Mutex
+
 	for name, buildArgs := range buildArgsPerContainer {
 		// create a copy of loop variables to avoid data race.
 		name := name
@@ -465,8 +468,6 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 		curs.Hide()
 		defer curs.Show()
 
-		// create a mutex for synchronizing access to the output map.
-		var mux sync.Mutex
 		g.Go(func() error {
 			defer pw.Close()
 			digest, err := d.repository.BuildAndPush(d.dockerCmdClient, buildArgs, pw)
