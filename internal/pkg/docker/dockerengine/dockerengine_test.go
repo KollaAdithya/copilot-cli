@@ -234,10 +234,9 @@ func TestDockerCommand_Login(t *testing.T) {
 	mockPassword := "mockPassword"
 	const mockLabel = `Login Succeeded
 
-	Logging in with your password grants your terminal complete access to your account. 
-	For better security, log in with a limited-privilege personal access token. Learn more at https://docs.docker.com/go/access-tokens/
-	
-	`
+Logging in with your password grants your terminal complete access to your account. 
+For better security, log in with a limited-privilege personal access token. Learn more at https://docs.docker.com/go/access-tokens/
+`
 
 	var mockCmd *MockCmd
 
@@ -259,18 +258,16 @@ func TestDockerCommand_Login(t *testing.T) {
 			setupMocks: func(controller *gomock.Controller) {
 				mockCmd = NewMockCmd(controller)
 
-				mockCmd.EXPECT().Run("docker", []string{"login", "-u", mockUsername, "--password-stdin", mockURI}, gomock.Any()).Do(func(_ string, _ []string, opts ...exec.CmdOption) error {
+				mockCmd.EXPECT().Run("docker", []string{"login", "-u", mockUsername, "--password-stdin", mockURI}, gomock.Any()).Do(func(_ string, _ []string, opts ...exec.CmdOption) {
 					cmd := &osexec.Cmd{}
 					for _, opt := range opts {
 						opt(cmd)
 					}
 					_, _ = cmd.Stdout.Write([]byte(`Login Succeeded
 
-					Logging in with your password grants your terminal complete access to your account. 
-					For better security, log in with a limited-privilege personal access token. Learn more at https://docs.docker.com/go/access-tokens/
-					
-					`))
-					return nil
+Logging in with your password grants your terminal complete access to your account. 
+For better security, log in with a limited-privilege personal access token. Learn more at https://docs.docker.com/go/access-tokens/
+`))
 				})
 			},
 			wantedLabel: mockLabel,
