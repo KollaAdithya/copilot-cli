@@ -69,7 +69,7 @@ func (noopActionRecommender) RecommendedActions() []string {
 }
 
 type repositoryService interface {
-	Login(docker repository.ContainerLoginBuildPusher) (string, error)
+	Login(docker repository.ContainerLoginBuildPusher) (string, string, error)
 	BuildAndPush(docker repository.ContainerLoginBuildPusher, args *dockerengine.BuildArguments) (string, error)
 }
 
@@ -152,6 +152,7 @@ type workloadDeployer struct {
 	rawMft        []byte
 	workspacePath string
 	uri           string
+	label         string
 
 	// Dependencies.
 	fs               fileReader
@@ -236,7 +237,7 @@ func newWorkloadDeployer(in *WorkloadDeployerInput) (*workloadDeployer, error) {
 	repository := repository.NewWithURI(
 		ecr.New(defaultSessEnvRegion), repoName, resources.RepositoryURLs[in.Name])
 	dockerCmdClient := dockerengine.New(exec.NewCmd())
-	uri, err := repository.Login(dockerCmdClient)
+	label, uri, err := repository.Login(dockerCmdClient)
 	if err != nil {
 		return nil, fmt.Errorf("login to docker: %w", err)
 	}
@@ -286,6 +287,7 @@ func newWorkloadDeployer(in *WorkloadDeployerInput) (*workloadDeployer, error) {
 		envConfig:                envConfig,
 		dockerCmdClient:          dockerCmdClient,
 		uri:                      uri,
+		label:                    label,
 
 		mft:    in.Mft,
 		rawMft: in.RawMft,
@@ -375,6 +377,7 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 		return nil
 	}
 	out.ImageDigests = make(map[string]ContainerImageIdentifier, len(buildArgsPerContainer))
+	fmt.Println(d.label)
 	for name, buildArgs := range buildArgsPerContainer {
 		digest, err := d.repository.BuildAndPush(d.dockerCmdClient, buildArgs)
 		if err != nil {

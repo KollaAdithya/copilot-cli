@@ -13,7 +13,7 @@ import (
 // ContainerLoginBuildPusher provides support for logging in to repositories, building images and pushing images to repositories.
 type ContainerLoginBuildPusher interface {
 	Build(args *dockerengine.BuildArguments) error
-	Login(uri, username, password string) error
+	Login(uri, username, password string) (string, error)
 	Push(uri string, tags ...string) (digest string, err error)
 	IsEcrCredentialHelperEnabled(uri string) bool
 }
@@ -84,20 +84,24 @@ func (r *Repository) URI() (string, error) {
 // but only if the `credStore` attribute value is not set to `ecr-login`.
 // If the `credStore` value is `ecr-login`, no login is performed.
 // Returns a URI or an error, if any occurs during the login process.
-func (r *Repository) Login(docker ContainerLoginBuildPusher) (string, error) {
+func (r *Repository) Login(docker ContainerLoginBuildPusher) (string, string, error) {
 	uri, err := r.URI()
 	if err != nil {
-		return "", fmt.Errorf("retrieve URI for repository: %w", err)
+		return "", "", fmt.Errorf("retrieve URI for repository: %w", err)
 	}
-	if !docker.IsEcrCredentialHelperEnabled(uri) {
-		username, password, err := r.registry.Auth()
-		if err != nil {
-			return "", fmt.Errorf("get auth: %w", err)
-		}
 
-		if err := docker.Login(uri, username, password); err != nil {
-			return "", fmt.Errorf("login to repo %s: %w", uri, err)
-		}
+	if docker.IsEcrCredentialHelperEnabled(uri) {
+		return "", uri, nil
 	}
-	return uri, nil
+	username, password, err := r.registry.Auth()
+	if err != nil {
+		return "", "", fmt.Errorf("get auth: %w", err)
+	}
+
+	label, err := docker.Login(uri, username, password)
+
+	if err != nil {
+		return label, "", fmt.Errorf("login to repo %s: %w", uri, err)
+	}
+	return label, uri, nil
 }

@@ -122,11 +122,18 @@ func TestRepository_BuildAndPush(t *testing.T) {
 
 func Test_Login(t *testing.T) {
 	const mockRepoURI = "mockRepoURI"
+	const mockLabel = `Login Succeeded
+
+	Logging in with your password grants your terminal complete access to your account. 
+	For better security, log in with a limited-privilege personal access token. Learn more at https://docs.docker.com/go/access-tokens/
+	
+	`
 	testCases := map[string]struct {
 		inMockDocker func(m *mocks.MockContainerLoginBuildPusher)
 		mockRegistry func(m *mocks.MockRegistry)
 		wantedURI    string
 		wantedError  error
+		wantedLabel  string
 	}{
 		"failed to get auth": {
 			mockRegistry: func(m *mocks.MockRegistry) {
@@ -137,6 +144,7 @@ func Test_Login(t *testing.T) {
 				m.EXPECT().Login(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 			},
 			wantedError: errors.New("get auth: error getting auth"),
+			wantedLabel: mockLabel,
 		},
 		"failed to login": {
 			mockRegistry: func(m *mocks.MockRegistry) {
@@ -144,9 +152,10 @@ func Test_Login(t *testing.T) {
 			},
 			inMockDocker: func(m *mocks.MockContainerLoginBuildPusher) {
 				m.EXPECT().IsEcrCredentialHelperEnabled("mockRepoURI").Return(false)
-				m.EXPECT().Login("mockRepoURI", "my-name", "my-pwd").Return(errors.New("error logging in"))
+				m.EXPECT().Login("mockRepoURI", "my-name", "my-pwd").Return("Login failed", errors.New("error logging in"))
 			},
 			wantedError: fmt.Errorf("login to repo %s: error logging in", mockRepoURI),
+			wantedLabel: mockLabel,
 		},
 		"no error when performing login": {
 			mockRegistry: func(m *mocks.MockRegistry) {
@@ -154,9 +163,10 @@ func Test_Login(t *testing.T) {
 			},
 			inMockDocker: func(m *mocks.MockContainerLoginBuildPusher) {
 				m.EXPECT().IsEcrCredentialHelperEnabled("mockRepoURI").Return(false)
-				m.EXPECT().Login("mockRepoURI", "my-name", "my-pwd").Return(nil)
+				m.EXPECT().Login("mockRepoURI", "my-name", "my-pwd").Return(mockLabel, nil)
 			},
-			wantedURI: mockRepoURI,
+			wantedURI:   mockRepoURI,
+			wantedLabel: mockLabel,
 		},
 	}
 	for name, tc := range testCases {
@@ -178,12 +188,13 @@ func Test_Login(t *testing.T) {
 				uri:      mockRepoURI,
 			}
 
-			got, gotErr := repo.Login(mockDocker)
+			gotLabel, got, gotErr := repo.Login(mockDocker)
 			if tc.wantedError != nil {
 				require.EqualError(t, tc.wantedError, gotErr.Error())
 			} else {
 				require.NoError(t, tc.wantedError, got)
 				require.Equal(t, tc.wantedURI, got)
+				require.Equal(t, tc.wantedLabel, gotLabel)
 			}
 		})
 	}

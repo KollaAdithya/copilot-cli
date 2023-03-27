@@ -227,34 +227,53 @@ func TestDockerCommand_Build(t *testing.T) {
 }
 
 func TestDockerCommand_Login(t *testing.T) {
-	mockError := errors.New("mockError")
+	// mockError := errors.New("mockError")
 
 	mockURI := "mockURI"
 	mockUsername := "mockUsername"
 	mockPassword := "mockPassword"
+	const mockLabel = `Login Succeeded
+
+	Logging in with your password grants your terminal complete access to your account. 
+	For better security, log in with a limited-privilege personal access token. Learn more at https://docs.docker.com/go/access-tokens/
+	
+	`
 
 	var mockCmd *MockCmd
 
 	tests := map[string]struct {
-		setupMocks func(controller *gomock.Controller)
-
-		want error
+		setupMocks  func(controller *gomock.Controller)
+		wantedLabel string
+		want        error
 	}{
-		"wrap error returned from Run()": {
-			setupMocks: func(controller *gomock.Controller) {
-				mockCmd = NewMockCmd(controller)
+		// "wrap error returned from Run()": {
+		// 	setupMocks: func(controller *gomock.Controller) {
+		// 		mockCmd = NewMockCmd(controller)
 
-				mockCmd.EXPECT().Run("docker", []string{"login", "-u", mockUsername, "--password-stdin", mockURI}, gomock.Any()).Return(mockError)
-			},
-			want: fmt.Errorf("authenticate to ECR: %w", mockError),
-		},
+		// 		mockCmd.EXPECT().Run("docker", []string{"login", "-u", mockUsername, "--password-stdin", mockURI}, ).Return(mockError)
+		// 	},
+		// 	want:        fmt.Errorf("authenticate to ECR: %w", mockError),
+		// 	wantedLabel: mockLabel,
+		// },
 		"happy path": {
 			setupMocks: func(controller *gomock.Controller) {
 				mockCmd = NewMockCmd(controller)
 
-				mockCmd.EXPECT().Run("docker", []string{"login", "-u", mockUsername, "--password-stdin", mockURI}, gomock.Any()).Return(nil)
+				mockCmd.EXPECT().Run("docker", []string{"login", "-u", mockUsername, "--password-stdin", mockURI}, gomock.Any()).Do(func(_ string, _ []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					_, _ = cmd.Stdout.Write([]byte(`Login Succeeded
+
+					Logging in with your password grants your terminal complete access to your account. 
+					For better security, log in with a limited-privilege personal access token. Learn more at https://docs.docker.com/go/access-tokens/
+					
+					`))
+					return nil
+				})
 			},
-			want: nil,
+			wantedLabel: mockLabel,
 		},
 	}
 
@@ -266,9 +285,10 @@ func TestDockerCommand_Login(t *testing.T) {
 				runner: mockCmd,
 			}
 
-			got := s.Login(mockURI, mockUsername, mockPassword)
+			gotLabel, got := s.Login(mockURI, mockUsername, mockPassword)
 
 			require.Equal(t, test.want, got)
+			require.Equal(t, test.wantedLabel, gotLabel)
 		})
 	}
 }

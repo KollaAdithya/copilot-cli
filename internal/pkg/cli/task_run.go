@@ -145,6 +145,7 @@ type runTaskOpts struct {
 	isDockerfileSet bool
 	nFlag           int
 	uri             string
+	label           string
 
 	// Interfaces to interact with dependencies.
 	fs      afero.Fs
@@ -226,11 +227,12 @@ func newTaskRunOpts(vars runTaskVars) (*runTaskOpts, error) {
 		opts.dockerCmdClient = dockerengine.New(exec.NewCmd())
 		repoName := fmt.Sprintf(deploy.FmtTaskECRRepoName, opts.groupName)
 		opts.repository = repository.New(ecr.New(opts.sess), repoName)
-		uri, err := opts.repository.Login(opts.dockerCmdClient)
+		uri, label, err := opts.repository.Login(opts.dockerCmdClient)
 		if err != nil {
 			return err
 		}
 		opts.uri = uri
+		opts.label = label
 		return nil
 	}
 
