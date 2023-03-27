@@ -140,7 +140,7 @@ func (c CmdClient) Build(in *BuildArguments, w io.Writer) error {
 	args = append(args, dfDir, "-f", in.Dockerfile)
 	// If host platform is not linux/amd64, show the user how the container image is being built; if the build fails (if their docker server doesn't have multi-platform-- and therefore `--platform` capability, for instance) they may see why.
 	if in.Platform != "" {
-		label := "Building and pushing your container image: docker" + strings.Join(args, " ") + "\n"
+		label := fmt.Sprintf("Building and pushing your container image: docker %s\n", strings.Join(args, " "))
 		io.WriteString(w, label)
 	}
 	if err := c.runner.Run("docker", args, exec.Stdout(w), exec.Stderr(w)); err != nil {
