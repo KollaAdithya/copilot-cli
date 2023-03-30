@@ -406,10 +406,7 @@ func (b *buildPushOutputBuffer) logs() (string, [maxLogLines]string) {
 
 	// Split the buffer bytes into lines
 	lines := strings.Split(strings.TrimSpace(b.buf.String()), "\n")
-	var label string
-	if len(lines) >= 1 {
-		label = lines[0]
-	}
+
 	// Determine the start and end index to extract last 5 lines
 	start := 1
 	if len(lines) > maxLogLines {
@@ -425,7 +422,7 @@ func (b *buildPushOutputBuffer) logs() (string, [maxLogLines]string) {
 		start++
 		idx++
 	}
-	return label, logLines
+	return lines[0], logLines
 }
 
 func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) error {
