@@ -412,7 +412,7 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 		// create a pipe for streaming the build and push output.
 		pr, pw := io.Pipe()
 		syncBuffer := syncbuffer.NewSyncBuffer()
-		termPrinter, err := syncbuffer.NewTermPrinter(log.DiagnosticWriter, syncBuffer, maxLogLines)
+		termPrinter, err := syncbuffer.NewTermPrinter(log.DiagnosticWriter, syncBuffer)
 		if err != nil {
 			return err
 		}
@@ -513,8 +513,9 @@ func isCIEnvironment() bool {
 	return false
 }
 
-// copyOutputToBuffer copies the build and push output from the given io.Reader to the TermPrinter buffer.
-// return an error if copying fails or if the reader returns an unexpected error.
+// copyOutputToBuffer reads the build and push output from the given io.Reader,
+// writes the label to the Label field of a SyncBuffer, and copies the remaining output to the buffer.
+// Returns an error if there is any issue reading or copying fails.
 func copyOutputToBuffer(pr io.Reader, buffer *syncbuffer.SyncBuffer, name string) error {
 	defer func() {
 		buffer.MarkDone()
@@ -523,7 +524,7 @@ func copyOutputToBuffer(pr io.Reader, buffer *syncbuffer.SyncBuffer, name string
 	bufReader := bufio.NewReader(pr)
 	label, err := bufReader.ReadString('\n')
 	if err != nil {
-		return fmt.Errorf("reading docker build label for container %s: %w", name, err)
+		return fmt.Errorf("read docker build label for container %s: %w", name, err)
 	}
 	// suffix "\n" should be trimmed because the delimiter is also included from "bufio.ReadString".
 	buffer.Label = strings.TrimSuffix(label, "\n")
@@ -548,7 +549,7 @@ func printAndErase(buffers []*syncbuffer.SyncBuffer, termPrinters []*syncbuffer.
 			if !buffers[i].IsDone() {
 				allDone = false
 			}
-			printer.Print()
+			printer.Print(maxLogLines)
 			totalWrittenLines += printer.PrevWrittenLines
 		}
 		if allDone {

@@ -23,11 +23,10 @@ type FileWriter interface {
 
 // SyncBuffer is a synchronized buffer that can be used to store output data and coordinate between multiple goroutines.
 type SyncBuffer struct {
-	Label string       // Label associated with the buffer.
-	bufMu sync.Mutex   // bufMu is a mutex that can be used to protect access to the buffer.
-	buf   bytes.Buffer // buf is the buffer that stores the data.
-
-	done chan struct{} // done is a channel that can be used to signal when the operations are complete.
+	Label string        // Label associated with the buffer.
+	bufMu sync.Mutex    // bufMu is a mutex that can be used to protect access to the buffer.
+	buf   bytes.Buffer  // buf is the buffer that stores the data.
+	done  chan struct{} // done is a channel that can be used to signal when the operations are complete.
 }
 
 // NewSyncBuffer creates and returns a new SyncBuffer object with an initialized 'done' channel.
@@ -75,13 +74,12 @@ func (b *SyncBuffer) MarkDone() {
 type TermPrinter struct {
 	term             FileWriter  // term writes logs to the terminal FileWriter.
 	buf              *SyncBuffer // buf stores logs before writing to the terminal.
-	numLines         int         // max number of lines the printer can write at once.
 	PrevWrittenLines int         // number of lines written during the last call to writeLines.
 	termWidth        int         // width of the terminal.
 }
 
 // NewTermPrinter returns a new instance of TermPrinter that writes logs to the given file writer and reads logs from a new synchronized buffer.
-func NewTermPrinter(fw FileWriter, syncBuf *SyncBuffer, numLines int) (*TermPrinter, error) {
+func NewTermPrinter(fw FileWriter, syncBuf *SyncBuffer) (*TermPrinter, error) {
 	width, err := terminalWidth()
 	if err != nil {
 		return nil, fmt.Errorf("get terminal width: %w", err)
@@ -89,32 +87,31 @@ func NewTermPrinter(fw FileWriter, syncBuf *SyncBuffer, numLines int) (*TermPrin
 	return &TermPrinter{
 		term:      fw,
 		buf:       syncBuf,
-		numLines:  numLines,
 		termWidth: width,
 	}, nil
 }
 
 // Print prints the label and the last N lines of logs to the termPrinter fileWriter.
-func (tp *TermPrinter) Print() {
+func (tp *TermPrinter) Print(numLines int) {
 	logs := tp.buf.strings()
 	if len(logs) == 0 {
 		return
 	}
-	outputLogs := tp.lastNLines(logs)
+	outputLogs := tp.lastNLines(logs, numLines)
 	tp.writeLines(tp.buf.Label, outputLogs)
 }
 
-// lastNLines returns the last N lines of the given logs where n is the value of tp.numLines.
-// If the logs slice contains fewer than n lines, all lines are returned.
-func (tp *TermPrinter) lastNLines(logs []string) []string {
+// lastNLines returns the last N lines of the given logs where N is the value of numLines.
+// If the logs slice contains fewer than N lines, all lines are returned.
+func (tp *TermPrinter) lastNLines(logs []string, numLines int) []string {
 	var start int
-	if len(logs) > tp.numLines {
-		start = len(logs) - tp.numLines
+	if len(logs) > numLines {
+		start = len(logs) - numLines
 	}
 	end := len(logs)
 
 	// Extract the last N lines of fixed length.
-	logLines := make([]string, tp.numLines)
+	logLines := make([]string, numLines)
 	idx := 0
 	for start < end {
 		logLines[idx] = strings.TrimSpace(logs[start])
@@ -130,11 +127,11 @@ func (tp *TermPrinter) writeLines(label string, outputLogs []string) {
 	for _, logLine := range outputLogs {
 		fmt.Fprintln(tp.term, logLine)
 	}
-	tp.PrevWrittenLines = tp.calculateLineCount(append(outputLogs, label))
+	tp.PrevWrittenLines = tp.calculateLinesCount(append(outputLogs, label))
 }
 
-// calculateLineCount returns the number of lines needed to print the given string slice based on the terminal width.
-func (tp *TermPrinter) calculateLineCount(lines []string) int {
+// calculateLinesCount returns the number of lines needed to print the given string slice based on the terminal width.
+func (tp *TermPrinter) calculateLinesCount(lines []string) int {
 	var numLines float64
 	for _, line := range lines {
 		// Empty line should be considered as a new line
@@ -162,3 +159,10 @@ func terminalWidth() (int, error) {
 	}
 	return width, nil
 }
+
+// func (tp *TermPrinter) eraseLines() {
+//  if tp.PrevWrittenLines == 0 {
+//      return
+//  }
+//  cursor.EraseLinesAbove(os.Stderr, tp.PrevWrittenLines)
+// }

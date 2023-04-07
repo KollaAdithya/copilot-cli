@@ -124,12 +124,10 @@ func TestTermPrinter_lastNLines(t *testing.T) {
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			// GIVEN
-			tp := &TermPrinter{
-				numLines: 5,
-			}
+			tp := &TermPrinter{}
 
 			// WHEN
-			actual := tp.lastNLines(tc.logs)
+			actual := tp.lastNLines(tc.logs, 5)
 
 			// THEN
 			require.Equal(t, tc.wanted, actual)
@@ -138,6 +136,7 @@ func TestTermPrinter_lastNLines(t *testing.T) {
 }
 
 func TestTermPrinter_Print(t *testing.T) {
+	const mockNumLines = 5
 	testCases := map[string]struct {
 		logs   []string
 		wanted string
@@ -173,13 +172,12 @@ line 8
 			buf.buf.Write([]byte(strings.Join(tc.logs, "\n")))
 			termOut := &bytes.Buffer{}
 			printer := TermPrinter{
-				buf:      buf,
-				term:     termOut,
-				numLines: 5,
+				buf:  buf,
+				term: termOut,
 			}
 
 			// WHEN
-			printer.Print()
+			printer.Print(mockNumLines)
 
 			// THEN
 			require.Equal(t, tc.wanted, termOut.String())
