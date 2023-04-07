@@ -465,44 +465,6 @@ func (mr *MockfileReaderMockRecorder) ReadFile(arg0 interface{}) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadFile", reflect.TypeOf((*MockfileReader)(nil).ReadFile), arg0)
 }
 
-// MockterminalWidthGetter is a mock of terminalWidthGetter interface.
-type MockterminalWidthGetter struct {
-	ctrl     *gomock.Controller
-	recorder *MockterminalWidthGetterMockRecorder
-}
-
-// MockterminalWidthGetterMockRecorder is the mock recorder for MockterminalWidthGetter.
-type MockterminalWidthGetterMockRecorder struct {
-	mock *MockterminalWidthGetter
-}
-
-// NewMockterminalWidthGetter creates a new mock instance.
-func NewMockterminalWidthGetter(ctrl *gomock.Controller) *MockterminalWidthGetter {
-	mock := &MockterminalWidthGetter{ctrl: ctrl}
-	mock.recorder = &MockterminalWidthGetterMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockterminalWidthGetter) EXPECT() *MockterminalWidthGetterMockRecorder {
-	return m.recorder
-}
-
-// TerminalWidth mocks base method.
-func (m *MockterminalWidthGetter) TerminalWidth() (int, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TerminalWidth")
-	ret0, _ := ret[0].(int)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// TerminalWidth indicates an expected call of TerminalWidth.
-func (mr *MockterminalWidthGetterMockRecorder) TerminalWidth() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TerminalWidth", reflect.TypeOf((*MockterminalWidthGetter)(nil).TerminalWidth))
-}
-
 // MocktimeoutError is a mock of timeoutError interface.
 type MocktimeoutError struct {
 	ctrl     *gomock.Controller

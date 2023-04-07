@@ -4,6 +4,7 @@
 package deploy
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -120,10 +121,6 @@ type fileReader interface {
 	ReadFile(string) ([]byte, error)
 }
 
-type terminalWidthGetter interface {
-	TerminalWidth() (int, error)
-}
-
 // StackRuntimeConfiguration contains runtime configuration for a workload CloudFormation stack.
 type StackRuntimeConfiguration struct {
 	ImageDigests       map[string]ContainerImageIdentifier // Container name to image.
@@ -168,19 +165,18 @@ type workloadDeployer struct {
 	workspacePath string
 
 	// Dependencies.
-	fs                  fileReader
-	s3Client            uploader
-	addons              stackBuilder
-	repository          repositoryService
-	deployer            serviceDeployer
-	tmplGetter          deployedTemplateGetter
-	endpointGetter      endpointGetter
-	spinner             spinner
-	templateFS          template.Reader
-	envVersionGetter    versionGetter
-	overrider           Overrider
-	customResources     customResourcesFunc
-	terminalWidthGetter terminalWidthGetter
+	fs               fileReader
+	s3Client         uploader
+	addons           stackBuilder
+	repository       repositoryService
+	deployer         serviceDeployer
+	tmplGetter       deployedTemplateGetter
+	endpointGetter   endpointGetter
+	spinner          spinner
+	templateFS       template.Reader
+	envVersionGetter versionGetter
+	overrider        Overrider
+	customResources  customResourcesFunc
 
 	// Cached variables.
 	defaultSess              *session.Session
@@ -269,7 +265,6 @@ func newWorkloadDeployer(in *WorkloadDeployerInput) (*workloadDeployer, error) {
 	}
 
 	cfn := cloudformation.New(envSession, cloudformation.WithProgressTracker(os.Stderr))
-	terminalWidthGetter := syncbuffer.NewTermPrinter(log.DiagnosticWriter)
 
 	return &workloadDeployer{
 		name:                     in.Name,
@@ -295,7 +290,6 @@ func newWorkloadDeployer(in *WorkloadDeployerInput) (*workloadDeployer, error) {
 		envSess:                  envSession,
 		store:                    store,
 		envConfig:                envConfig,
-		terminalWidthGetter:      terminalWidthGetter,
 		mft:                      in.Mft,
 		rawMft:                   in.RawMft,
 	}, nil
@@ -392,7 +386,10 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	var mu sync.Mutex
 	out.ImageDigests = make(map[string]ContainerImageIdentifier, len(buildArgsPerContainer))
 
-	// create an array of printers, one for each container.
+	// An array of buffers, one for each TermPrinter.
+	syncBuffers := make([]*syncbuffer.SyncBuffer, len(buildArgsPerContainer))
+
+	// An array of printers, one for each container.
 	termPrinters := make([]*syncbuffer.TermPrinter, len(buildArgsPerContainer))
 
 	// create a context and an error group.
@@ -414,9 +411,13 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 
 		// create a pipe for streaming the build and push output.
 		pr, pw := io.Pipe()
-
-		termPrinter := syncbuffer.NewTermPrinter(log.DiagnosticWriter)
+		syncBuffer := syncbuffer.NewSyncBuffer()
+		termPrinter, err := syncbuffer.NewTermPrinter(log.DiagnosticWriter, syncBuffer, maxLogLines)
+		if err != nil {
+			return err
+		}
 		termPrinters[count] = termPrinter
+		syncBuffers[count] = syncBuffer
 		count++
 
 		g.Go(func() error {
@@ -426,28 +427,28 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 				return fmt.Errorf("build and push image: %w", err)
 			}
 			mu.Lock()
-			defer mu.Unlock()
 			out.ImageDigests[name] = ContainerImageIdentifier{
 				Digest:            digest,
 				CustomTag:         d.image.CustomTag,
 				GitShortCommitTag: d.image.GitShortCommitTag,
 			}
+			mu.Unlock()
 			return nil
 		})
 
 		g.Go(func() error {
-			return copyOutputToBuffer(pr, termPrinter, name)
+			return copyOutputToBuffer(pr, syncBuffer, name)
 		})
 	}
 
 	// check if CI is true or not.
 	if isCIEnvironment() {
 		g.Go(func() error {
-			return printAll(termPrinters)
+			return printAll(syncBuffers, termPrinters)
 		})
 	} else {
 		g.Go(func() error {
-			return printAndErase(d.terminalWidthGetter, termPrinters)
+			return printAndErase(syncBuffers, termPrinters)
 		})
 	}
 
@@ -514,13 +515,21 @@ func isCIEnvironment() bool {
 
 // copyOutputToBuffer copies the build and push output from the given io.Reader to the TermPrinter buffer.
 // return an error if copying fails or if the reader returns an unexpected error.
-func copyOutputToBuffer(pr io.Reader, printer *syncbuffer.TermPrinter, name string) error {
+func copyOutputToBuffer(pr io.Reader, buffer *syncbuffer.SyncBuffer, name string) error {
 	defer func() {
-		printer.Buf.MarkDone()
+		buffer.MarkDone()
 	}()
 
-	// copy the build and push output to the output buffer
-	_, err := io.Copy(printer.Buf, pr)
+	bufReader := bufio.NewReader(pr)
+	label, err := bufReader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("reading docker build label for container %s: %w", name, err)
+	}
+	// suffix "\n" should be trimmed because the delimiter is also included from "bufio.ReadString".
+	buffer.Label = strings.TrimSuffix(label, "\n")
+
+	// copy the remaining build and push output to the output buffer
+	_, err = io.Copy(buffer, bufReader)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("copying build and push output for container %s: %w", name, err)
 	}
@@ -530,26 +539,17 @@ func copyOutputToBuffer(pr io.Reader, printer *syncbuffer.TermPrinter, name stri
 // printAndErase prints the build and push output from the list of TermPrinter buffers.
 // It polls each buffer until all build and push calls are completed,
 // and erases the previous output after sleeping for a short duration.
-func printAndErase(t terminalWidthGetter, termPrinters []*syncbuffer.TermPrinter) error {
+func printAndErase(buffers []*syncbuffer.SyncBuffer, termPrinters []*syncbuffer.TermPrinter) error {
 	for {
 		totalWrittenLines := 0
 		// check whether all build and push calls are completed.
 		allDone := true
-		for _, printer := range termPrinters {
-			if !printer.Buf.IsDone() {
+		for i, printer := range termPrinters {
+			if !buffers[i].IsDone() {
 				allDone = false
 			}
-
-			// calculate the terminal width everytime just before printing to the terminal.
-			width, err := t.TerminalWidth()
-			if err != nil {
-				return fmt.Errorf("get terminal width: %w", err)
-			}
-			printer.TermWidth = width
-
-			// print label and last five logs.
-			printer.PrintLastFiveLines()
-			totalWrittenLines = totalWrittenLines + printer.PrevWrittenLines
+			printer.Print()
+			totalWrittenLines += printer.PrevWrittenLines
 		}
 		if allDone {
 			break
@@ -562,12 +562,12 @@ func printAndErase(t terminalWidthGetter, termPrinters []*syncbuffer.TermPrinter
 	return nil
 }
 
-// PrintAll prints all contents from given TermPrinter buffers once they have finished writing.
-func printAll(printers []*syncbuffer.TermPrinter) error {
+// printAll prints all contents from given TermPrinter buffers once they have finished writing.
+func printAll(buffers []*syncbuffer.SyncBuffer, printers []*syncbuffer.TermPrinter) error {
 	count := 0
 	for {
-		for _, printer := range printers {
-			if printer.Buf.IsDone() {
+		for i, printer := range printers {
+			if buffers[i].IsDone() {
 				printer.PrintAll()
 				count++
 			}

@@ -35,7 +35,7 @@ func TestSyncBuffer_Write(t *testing.T) {
 			sb.Write(tc.input)
 
 			// THEN
-			require.Equal(t, tc.wantedOutput, sb.Buf.String())
+			require.Equal(t, tc.wantedOutput, sb.buf.String())
 		})
 	}
 }
@@ -46,11 +46,11 @@ func TestSyncBuffer_IsDone(t *testing.T) {
 		wantedDone bool
 	}{
 		"Buffer is done": {
-			buffer:     &SyncBuffer{Done: make(chan struct{}), Buf: bytes.Buffer{}},
+			buffer:     &SyncBuffer{done: make(chan struct{}), buf: bytes.Buffer{}},
 			wantedDone: true,
 		},
 		"Buffer is not done": {
-			buffer: &SyncBuffer{Done: make(chan struct{}), Buf: bytes.Buffer{}},
+			buffer: &SyncBuffer{done: make(chan struct{}), buf: bytes.Buffer{}},
 		},
 	}
 
@@ -76,13 +76,16 @@ func TestSyncBuffer_strings(t *testing.T) {
 		input  []byte
 		wanted []string
 	}{
-		"single line": {
+		"single line in buffer": {
 			input:  []byte("hello"),
 			wanted: []string{"hello"},
 		},
-		"multiple lines": {
+		"multiple lines in buffer": {
 			input:  []byte("hello\nworld\n"),
 			wanted: []string{"hello", "world"},
+		},
+		"empty buffer": {
+			input: []byte(""),
 		},
 	}
 
@@ -102,31 +105,31 @@ func TestSyncBuffer_strings(t *testing.T) {
 	}
 }
 
-func TestTermPrinter_lastFiveLogLines(t *testing.T) {
+func TestTermPrinter_lastNLines(t *testing.T) {
 	testCases := map[string]struct {
-		logs   []string
-		wanted [5]string
+		logs     []string
+		wanted   []string
+		numLines int
 	}{
 		"more than five lines": {
-			logs:   []string{"label", "line1", "line2", "line3", "line4", "line5", "line6", "line7"},
-			wanted: [5]string{"line3", "line4", "line5", "line6", "line7"},
+			logs:   []string{"line1", "line2", "line3", "line4", "line5", "line6", "line7"},
+			wanted: []string{"line3", "line4", "line5", "line6", "line7"},
 		},
 		"less than five lines": {
-			logs:   []string{"label", "line1", "line2"},
-			wanted: [5]string{"line1", "line2"},
-		},
-		"empty log": {
-			logs: []string{},
+			logs:   []string{"line1", "line2"},
+			wanted: []string{"line1", "line2", "", "", ""},
 		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			// GIVEN
-			tp := &TermPrinter{}
+			tp := &TermPrinter{
+				numLines: 5,
+			}
 
 			// WHEN
-			actual := tp.lastFiveLogLines(tc.logs)
+			actual := tp.lastNLines(tc.logs)
 
 			// THEN
 			require.Equal(t, tc.wanted, actual)
@@ -134,14 +137,14 @@ func TestTermPrinter_lastFiveLogLines(t *testing.T) {
 	}
 }
 
-func TestTermPrinter_PrintLastFiveLines(t *testing.T) {
+func TestTermPrinter_Print(t *testing.T) {
 	testCases := map[string]struct {
 		logs   []string
 		wanted string
 	}{
 		"display label and last five log lines": {
 			logs: []string{
-				"label",
+				"line 1",
 				"line 2",
 				"line 3",
 				"line 4",
@@ -150,7 +153,7 @@ func TestTermPrinter_PrintLastFiveLines(t *testing.T) {
 				"line 7",
 				"line 8",
 			},
-			wanted: `label
+			wanted: `docker build label
 line 4
 line 5
 line 6
@@ -164,17 +167,19 @@ line 8
 		t.Run(name, func(t *testing.T) {
 			// GIVEN
 			buf := &SyncBuffer{
-				Buf: bytes.Buffer{},
+				Label: "docker build label",
+				buf:   bytes.Buffer{},
 			}
-			buf.Buf.Write([]byte(strings.Join(tc.logs, "\n")))
+			buf.buf.Write([]byte(strings.Join(tc.logs, "\n")))
 			termOut := &bytes.Buffer{}
 			printer := TermPrinter{
-				Buf:  buf,
-				Term: termOut,
+				buf:      buf,
+				term:     termOut,
+				numLines: 5,
 			}
 
 			// WHEN
-			printer.PrintLastFiveLines()
+			printer.Print()
 
 			// THEN
 			require.Equal(t, tc.wanted, termOut.String())
@@ -214,13 +219,13 @@ line 8
 		t.Run(name, func(t *testing.T) {
 			// GIVEN
 			buf := &SyncBuffer{
-				Buf: bytes.Buffer{},
+				buf: bytes.Buffer{},
 			}
-			buf.Buf.Write([]byte(strings.Join(tc.logs, "\n")))
+			buf.buf.Write([]byte(strings.Join(tc.logs, "\n")))
 			termOut := &bytes.Buffer{}
 			printer := TermPrinter{
-				Buf:  buf,
-				Term: termOut,
+				buf:  buf,
+				term: termOut,
 			}
 			// WHEN
 			printer.PrintAll()
