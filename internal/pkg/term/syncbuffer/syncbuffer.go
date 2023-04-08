@@ -159,10 +159,3 @@ func terminalWidth() (int, error) {
 	}
 	return width, nil
 }
-
-// func (tp *TermPrinter) eraseLines() {
-//  if tp.PrevWrittenLines == 0 {
-//      return
-//  }
-//  cursor.EraseLinesAbove(os.Stderr, tp.PrevWrittenLines)
-// }

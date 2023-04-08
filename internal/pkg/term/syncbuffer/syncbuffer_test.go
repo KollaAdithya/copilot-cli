@@ -136,10 +136,11 @@ func TestTermPrinter_lastNLines(t *testing.T) {
 }
 
 func TestTermPrinter_Print(t *testing.T) {
-	const mockNumLines = 5
 	testCases := map[string]struct {
-		logs   []string
-		wanted string
+		logs       []string
+		inNumLines int
+		inLabel    string
+		wanted     string
 	}{
 		"display label and last five log lines": {
 			logs: []string{
@@ -152,6 +153,8 @@ func TestTermPrinter_Print(t *testing.T) {
 				"line 7",
 				"line 8",
 			},
+			inNumLines: 5,
+			inLabel:    "docker build label",
 			wanted: `docker build label
 line 4
 line 5
@@ -160,13 +163,18 @@ line 7
 line 8
 `,
 		},
+		"if input for number of lines is zero": {
+			logs:       []string{"line 1", "line 2", "line 3", "line 4"},
+			inNumLines: 0,
+			wanted:     "\n",
+		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			// GIVEN
 			buf := &SyncBuffer{
-				Label: "docker build label",
+				Label: tc.inLabel,
 				buf:   bytes.Buffer{},
 			}
 			buf.buf.Write([]byte(strings.Join(tc.logs, "\n")))
@@ -177,7 +185,7 @@ line 8
 			}
 
 			// WHEN
-			printer.Print(mockNumLines)
+			printer.Print(tc.inNumLines)
 
 			// THEN
 			require.Equal(t, tc.wanted, termOut.String())
