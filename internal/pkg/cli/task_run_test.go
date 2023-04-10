@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -762,7 +763,7 @@ func mockHasDefaultCluster(m runTaskMocks) {
 func mockRepositoryAnytime(m runTaskMocks) {
 	m.repository.EXPECT().URI().AnyTimes()
 	m.repository.EXPECT().Login().AnyTimes()
-	m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Any()).AnyTimes()
+	m.repository.EXPECT().BuildAndPush(context.Background(), gomock.Any(), gomock.Any()).AnyTimes()
 }
 
 func TestTaskRunOpts_Execute(t *testing.T) {
@@ -771,6 +772,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 		mockRepoURI = "uri/repo"
 		tag         = "tag"
 	)
+	ctx := context.Background()
 	defaultBuildArguments := dockerengine.BuildArguments{
 		Context: filepath.Dir(defaultDockerfilePath),
 		Tags:    []string{imageTagLatest},
@@ -860,7 +862,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 				}).Return(nil)
 				m.repository.EXPECT().URI().Return(mockRepoURI, nil)
 				m.repository.EXPECT().Login().Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Any())
+				m.repository.EXPECT().BuildAndPush(ctx, gomock.Any(), gomock.Any())
 				m.deployer.EXPECT().DeployTask(&deploy.CreateTaskResourcesInput{
 					Name:       inGroupName,
 					Image:      "uri/repo:latest",
@@ -914,7 +916,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 				m.deployer.EXPECT().DeployTask(gomock.Any()).AnyTimes()
 				m.repository.EXPECT().URI().Return(mockRepoURI, nil)
 				m.repository.EXPECT().Login().Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Eq(
+				m.repository.EXPECT().BuildAndPush(ctx, gomock.Eq(
 					&dockerengine.BuildArguments{
 						Context: filepath.Dir(defaultDockerfilePath),
 						Tags:    []string{imageTagLatest, tag},
@@ -933,7 +935,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 				m.deployer.EXPECT().DeployTask(gomock.Any()).AnyTimes()
 				m.repository.EXPECT().URI().Return(mockRepoURI, nil)
 				m.repository.EXPECT().Login().Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Eq(
+				m.repository.EXPECT().BuildAndPush(ctx, gomock.Eq(
 					&dockerengine.BuildArguments{
 						Context: "../../other",
 						Tags:    []string{imageTagLatest},
@@ -958,7 +960,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 				}).Times(1).Return(nil)
 				m.repository.EXPECT().URI().Return(mockRepoURI, nil)
 				m.repository.EXPECT().Login().Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Eq(&defaultBuildArguments), gomock.Any())
+				m.repository.EXPECT().BuildAndPush(ctx, gomock.Eq(&defaultBuildArguments), gomock.Any())
 				m.deployer.EXPECT().DeployTask(&deploy.CreateTaskResourcesInput{
 					Name:       inGroupName,
 					Image:      "uri/repo:latest",

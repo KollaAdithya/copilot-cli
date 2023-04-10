@@ -6,6 +6,7 @@ package dockerengine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 // Cmd is the interface implemented by external commands.
 type Cmd interface {
 	Run(name string, args []string, options ...exec.CmdOption) error
+	RunWithContext(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error
 }
 
 // Operating systems and architectures supported by docker.
@@ -75,7 +77,7 @@ type dockerConfig struct {
 }
 
 // Build will run a `docker build` command for the given ecr repo URI and build arguments.
-func (c CmdClient) Build(in *BuildArguments, w io.Writer) error {
+func (c CmdClient) Build(ctx context.Context, in *BuildArguments, w io.Writer) error {
 
 	// Tags must not be empty to build an docker image.
 	if len(in.Tags) == 0 {
@@ -146,7 +148,7 @@ func (c CmdClient) Build(in *BuildArguments, w io.Writer) error {
 			return fmt.Errorf("build label to writer :%w", err)
 		}
 	}
-	if err := c.runner.Run("docker", args, exec.Stdout(w), exec.Stderr(w)); err != nil {
+	if err := c.runner.RunWithContext(ctx, "docker", args, exec.Stdout(w), exec.Stderr(w)); err != nil {
 		return fmt.Errorf("building image: %w", err)
 	}
 
@@ -167,7 +169,7 @@ func (c CmdClient) Login(uri, username, password string) error {
 }
 
 // Push pushes the images with the specified tags and ecr repository URI, and returns the image digest on success.
-func (c CmdClient) Push(uri string, w io.Writer, tags ...string) (digest string, err error) {
+func (c CmdClient) Push(ctx context.Context, uri string, w io.Writer, tags ...string) (digest string, err error) {
 	images := []string{}
 	for _, tag := range tags {
 		images = append(images, imageName(uri, tag))
@@ -178,7 +180,7 @@ func (c CmdClient) Push(uri string, w io.Writer, tags ...string) (digest string,
 	}
 
 	for _, img := range images {
-		if err := c.runner.Run("docker", append([]string{"push", img}, args...), exec.Stdout(w), exec.Stderr(w)); err != nil {
+		if err := c.runner.RunWithContext(ctx, "docker", append([]string{"push", img}, args...), exec.Stdout(w), exec.Stderr(w)); err != nil {
 			return "", fmt.Errorf("docker push %s: %w", img, err)
 		}
 	}
@@ -187,7 +189,7 @@ func (c CmdClient) Push(uri string, w io.Writer, tags ...string) (digest string,
 	// Pick the first tag and get the image's digest.
 	// For Main container we call  docker inspect --format '{{json (index .RepoDigests 0)}}' uri:latest
 	// For Sidecar container images we call docker inspect --format '{{json (index .RepoDigests 0)}}' uri:<sidecarname>-latest
-	if err := c.runner.Run("docker", []string{"inspect", "--format", "'{{json (index .RepoDigests 0)}}'", imageName(uri, tags[0])}, exec.Stdout(buf)); err != nil {
+	if err := c.runner.RunWithContext(ctx, "docker", []string{"inspect", "--format", "'{{json (index .RepoDigests 0)}}'", imageName(uri, tags[0])}, exec.Stdout(buf)); err != nil {
 		return "", fmt.Errorf("inspect image digest for %s: %w", uri, err)
 	}
 	repoDigest := strings.Trim(strings.TrimSpace(buf.String()), `"'`) // remove new lines and quotes from output

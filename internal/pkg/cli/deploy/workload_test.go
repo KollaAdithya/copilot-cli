@@ -14,6 +14,7 @@ import (
 	"time"
 
 	cloudformation0 "github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation"
+	"github.com/aws/copilot-cli/internal/pkg/docker/dockerengine"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -25,7 +26,6 @@ import (
 	"github.com/aws/copilot-cli/internal/pkg/deploy"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation/stack"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/upload/customresource"
-	"github.com/aws/copilot-cli/internal/pkg/docker/dockerengine"
 	"github.com/aws/copilot-cli/internal/pkg/manifest"
 	"github.com/aws/copilot-cli/internal/pkg/override"
 	"github.com/aws/copilot-cli/internal/pkg/template"
@@ -202,7 +202,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 			},
 			mock: func(t *testing.T, m *deployMocks) {
 				m.mockRepositoryService.EXPECT().Login().Return(nil)
-				m.mockRepositoryService.EXPECT().BuildAndPush(&dockerengine.BuildArguments{
+				m.mockRepositoryService.EXPECT().BuildAndPush(gomock.Any(), &dockerengine.BuildArguments{
 					Dockerfile: "mockDockerfile",
 					Context:    "mockContext",
 					Platform:   "mockContainerPlatform",
@@ -226,7 +226,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 			},
 			mock: func(t *testing.T, m *deployMocks) {
 				m.mockRepositoryService.EXPECT().Login().Return(nil)
-				m.mockRepositoryService.EXPECT().BuildAndPush(&dockerengine.BuildArguments{
+				m.mockRepositoryService.EXPECT().BuildAndPush(gomock.Any(), &dockerengine.BuildArguments{
 					Dockerfile: "mockDockerfile",
 					Context:    "mockContext",
 					Platform:   "mockContainerPlatform",
@@ -257,7 +257,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 			},
 			mock: func(t *testing.T, m *deployMocks) {
 				m.mockRepositoryService.EXPECT().Login().Return(nil)
-				m.mockRepositoryService.EXPECT().BuildAndPush(&dockerengine.BuildArguments{
+				m.mockRepositoryService.EXPECT().BuildAndPush(gomock.Any(), &dockerengine.BuildArguments{
 					Dockerfile: "mockDockerfile",
 					Context:    "mockContext",
 					Platform:   "mockContainerPlatform",
@@ -290,7 +290,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 			inMockGitTag: "gitTag",
 			mock: func(t *testing.T, m *deployMocks) {
 				m.mockRepositoryService.EXPECT().Login().Return(nil)
-				m.mockRepositoryService.EXPECT().BuildAndPush(&dockerengine.BuildArguments{
+				m.mockRepositoryService.EXPECT().BuildAndPush(gomock.Any(), &dockerengine.BuildArguments{
 					Dockerfile: "sidecarMockDockerfile",
 					Context:    "sidecarMockContext",
 					Platform:   "mockContainerPlatform",
@@ -300,7 +300,7 @@ func TestWorkloadDeployer_UploadArtifacts(t *testing.T) {
 						"com.aws.copilot.image.container.name": "nginx",
 					},
 				}, gomock.Any()).Return("sidecarMockDigest1", nil)
-				m.mockRepositoryService.EXPECT().BuildAndPush(&dockerengine.BuildArguments{
+				m.mockRepositoryService.EXPECT().BuildAndPush(gomock.Any(), &dockerengine.BuildArguments{
 					Dockerfile: "web/Dockerfile",
 					Context:    "Users/bowie",
 					Platform:   "mockContainerPlatform",

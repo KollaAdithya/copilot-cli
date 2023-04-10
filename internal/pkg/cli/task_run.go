@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -966,7 +967,7 @@ func (o *runTaskOpts) buildAndPushImage() error {
 		ctx = o.dockerfileContextPath
 	}
 
-	if _, err := o.repository.BuildAndPush(&dockerengine.BuildArguments{
+	if _, err := o.repository.BuildAndPush(context.Background(), &dockerengine.BuildArguments{
 		Dockerfile: o.dockerfilePath,
 		Context:    ctx,
 		Tags:       append([]string{imageTagLatest}, additionalTags...),

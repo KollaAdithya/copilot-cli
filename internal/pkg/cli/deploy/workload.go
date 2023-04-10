@@ -77,7 +77,7 @@ func (noopActionRecommender) RecommendedActions() []string {
 
 type repositoryService interface {
 	Login() error
-	BuildAndPush(args *dockerengine.BuildArguments, w io.Writer) (string, error)
+	BuildAndPush(ctx context.Context, args *dockerengine.BuildArguments, w io.Writer) (string, error)
 }
 
 type templater interface {
@@ -384,8 +384,7 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	syncBuffers := make([]*syncbuffer.LabeledSyncBuffer, len(buildArgsPerContainer))
 
 	// create a context and an error group.
-	ctx := context.Background()
-	g, _ := errgroup.WithContext(ctx)
+	g, ctx := errgroup.WithContext(context.Background())
 
 	// counter for indexing the output buffers.
 	count := 0
@@ -405,7 +404,7 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 
 		g.Go(func() error {
 			defer pw.Close()
-			digest, err := d.repository.BuildAndPush(buildArgs, pw)
+			digest, err := d.repository.BuildAndPush(ctx, buildArgs, pw)
 			if err != nil {
 				return fmt.Errorf("build and push image: %w", err)
 			}
