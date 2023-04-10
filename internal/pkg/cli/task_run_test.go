@@ -762,7 +762,7 @@ func mockHasDefaultCluster(m runTaskMocks) {
 func mockRepositoryAnytime(m runTaskMocks) {
 	m.repository.EXPECT().URI().AnyTimes()
 	m.repository.EXPECT().Login().AnyTimes()
-	m.repository.EXPECT().BuildAndPush(gomock.Any()).AnyTimes()
+	m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Any()).AnyTimes()
 }
 
 func TestTaskRunOpts_Execute(t *testing.T) {
@@ -860,7 +860,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 				}).Return(nil)
 				m.repository.EXPECT().URI().Return(mockRepoURI, nil)
 				m.repository.EXPECT().Login().Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Any())
+				m.repository.EXPECT().BuildAndPush(gomock.Any(), gomock.Any())
 				m.deployer.EXPECT().DeployTask(&deploy.CreateTaskResourcesInput{
 					Name:       inGroupName,
 					Image:      "uri/repo:latest",
@@ -919,6 +919,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 						Context: filepath.Dir(defaultDockerfilePath),
 						Tags:    []string{imageTagLatest, tag},
 					}),
+					gomock.Any(),
 				)
 				m.runner.EXPECT().Run().AnyTimes()
 				mockHasDefaultCluster(m)
@@ -937,6 +938,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 						Context: "../../other",
 						Tags:    []string{imageTagLatest},
 					}),
+					gomock.Any(),
 				)
 				m.runner.EXPECT().Run().AnyTimes()
 				mockHasDefaultCluster(m)
@@ -956,7 +958,7 @@ func TestTaskRunOpts_Execute(t *testing.T) {
 				}).Times(1).Return(nil)
 				m.repository.EXPECT().URI().Return(mockRepoURI, nil)
 				m.repository.EXPECT().Login().Return(nil)
-				m.repository.EXPECT().BuildAndPush(gomock.Eq(&defaultBuildArguments))
+				m.repository.EXPECT().BuildAndPush(gomock.Eq(&defaultBuildArguments), gomock.Any())
 				m.deployer.EXPECT().DeployTask(&deploy.CreateTaskResourcesInput{
 					Name:       inGroupName,
 					Image:      "uri/repo:latest",

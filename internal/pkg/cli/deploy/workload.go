@@ -4,13 +4,16 @@
 package deploy
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -34,11 +37,14 @@ import (
 	"github.com/aws/copilot-cli/internal/pkg/template/artifactpath"
 	"github.com/aws/copilot-cli/internal/pkg/template/diff"
 	"github.com/aws/copilot-cli/internal/pkg/term/color"
+	"github.com/aws/copilot-cli/internal/pkg/term/cursor"
 	"github.com/aws/copilot-cli/internal/pkg/term/log"
 	termprogress "github.com/aws/copilot-cli/internal/pkg/term/progress"
+	"github.com/aws/copilot-cli/internal/pkg/term/syncbuffer"
 	"github.com/aws/copilot-cli/internal/pkg/version"
 	"github.com/aws/copilot-cli/internal/pkg/workspace"
 	"github.com/spf13/afero"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -56,6 +62,8 @@ const (
 	labelForContainerName = "com.aws.copilot.image.container.name"
 )
 
+const paddingForBuildAndPush = 5
+
 // ActionRecommender contains methods that output action recommendation.
 type ActionRecommender interface {
 	RecommendedActions() []string
@@ -69,7 +77,7 @@ func (noopActionRecommender) RecommendedActions() []string {
 
 type repositoryService interface {
 	Login() error
-	BuildAndPush(args *dockerengine.BuildArguments) (string, error)
+	BuildAndPush(args *dockerengine.BuildArguments, w io.Writer) (string, error)
 }
 
 type templater interface {
@@ -368,17 +376,78 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	if err != nil {
 		return fmt.Errorf("login to image repository: %w", err)
 	}
+	// mutex for synchronizing access to the output map.
+	var mu sync.Mutex
 	out.ImageDigests = make(map[string]ContainerImageIdentifier, len(buildArgsPerContainer))
+
+	// An array of buffers, one for each TermPrinter.
+	syncBuffers := make([]*syncbuffer.LabeledSyncBuffer, len(buildArgsPerContainer))
+
+	// create a context and an error group.
+	ctx := context.Background()
+	g, _ := errgroup.WithContext(ctx)
+
+	// counter for indexing the output buffers.
+	count := 0
+
+	// create a new cursor and hide it.
+	cursor := cursor.New()
+	cursor.Hide()
+
 	for name, buildArgs := range buildArgsPerContainer {
-		digest, err := d.repository.BuildAndPush(buildArgs)
-		if err != nil {
-			return fmt.Errorf("build and push image: %w", err)
-		}
-		out.ImageDigests[name] = ContainerImageIdentifier{
-			Digest:            digest,
-			CustomTag:         d.image.CustomTag,
-			GitShortCommitTag: d.image.GitShortCommitTag,
-		}
+
+		// create a copy of loop variables to avoid data race.
+		name := name
+		buildArgs := buildArgs
+
+		// create a pipe for streaming the build and push output.
+		pr, pw := io.Pipe()
+
+		g.Go(func() error {
+			defer pw.Close()
+			digest, err := d.repository.BuildAndPush(buildArgs, pw)
+			if err != nil {
+				return fmt.Errorf("build and push image: %w", err)
+			}
+			mu.Lock()
+			out.ImageDigests[name] = ContainerImageIdentifier{
+				Digest:            digest,
+				CustomTag:         d.image.CustomTag,
+				GitShortCommitTag: d.image.GitShortCommitTag,
+			}
+			mu.Unlock()
+			return nil
+		})
+
+		syncBuffer := syncbuffer.New(syncbuffer.NewSyncBuffer())
+		syncBuffers[count] = syncBuffer
+		count++
+
+		g.Go(func() error {
+			return copyLabelandOutput(pr, syncBuffer, name)
+		})
+	}
+
+	numLines := 5
+	if isCIEnvironment() {
+		numLines = -1
+	}
+
+	// create a LabeledTermPrinter for rendering build and push output.
+	labeledTermPrinter, err := syncbuffer.NewLabeledTermPrinter(log.DiagnosticWriter,
+		syncBuffers, syncbuffer.WithNumLines(numLines), syncbuffer.WithPadding(paddingForBuildAndPush))
+	if err != nil {
+		return fmt.Errorf("create new labeled term printer: %w", err)
+	}
+
+	g.Go(func() error {
+		labeledTermPrinter.Print()
+		return nil
+	})
+
+	// wait for all goroutines to complete and return any errors.
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -426,6 +495,34 @@ func buildArgsPerContainer(name, workspacePath string, img ContainerImageIdentif
 		}
 	}
 	return dArgs, nil
+}
+
+// isCIEnvironment checks if the current environment is a continuous integration (CI) system.
+// Returns true by looking for the "CI" environment variable  if it's set to "true", otherwise false.
+func isCIEnvironment() bool {
+	if ci, _ := os.LookupEnv("CI"); ci == "true" {
+		return true
+	}
+	return false
+}
+
+// copyLabelandOutput reads the build and push output from the given io.Reader,
+// writes the label to the LabeledSyncBuffer, and copies the remaining output to the buffer.
+// Returns an error if there is any issue reading or copying fails.
+func copyLabelandOutput(pr io.Reader, buffer *syncbuffer.LabeledSyncBuffer, name string) error {
+
+	bufReader := bufio.NewReader(pr)
+	label, err := bufReader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("read docker build label for container %s: %w", name, err)
+	}
+	// suffix "\n" should be trimmed because the delimiter is also included from "bufio.ReadString".
+	buffer.Label = strings.TrimSuffix(label, "\n")
+
+	if err := buffer.CopyToLabeledBuffer(bufReader); err != nil {
+		return fmt.Errorf("copying build and push output for container %s: %w", name, err)
+	}
+	return nil
 }
 
 func (d *workloadDeployer) uploadArtifactsToS3(out *UploadArtifactsOutput) error {

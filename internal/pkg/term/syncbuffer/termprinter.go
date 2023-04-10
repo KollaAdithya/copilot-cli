@@ -94,8 +94,8 @@ func (ltp *LabeledTermPrinter) Print() {
 				continue
 			}
 			outputLogs := ltp.lastNLines(logs)
-			ltp.writeLines(buf.label, outputLogs)
-			ltp.prevWrittenLines += ltp.calculateLinesCount(append(outputLogs, buf.label))
+			ltp.writeLines(buf.Label, outputLogs)
+			ltp.prevWrittenLines += ltp.calculateLinesCount(append(outputLogs, buf.Label))
 		}
 		if ltp.isDone() {
 			break
@@ -162,7 +162,7 @@ func (ltp *LabeledTermPrinter) PrintAll() {
 				continue
 			}
 			outputLogs := ltp.buffers[idx].syncBuf.strings()
-			ltp.writeLines(buf.label, outputLogs)
+			ltp.writeLines(buf.Label, outputLogs)
 			doneCount++
 		}
 		if doneCount >= len(ltp.buffers) {

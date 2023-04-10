@@ -51,7 +51,7 @@ func TestLabeledTermPrinter_Print(t *testing.T) {
 			inLabeledTermPrinter: LabeledTermPrinter{
 				buffers: []*LabeledSyncBuffer{
 					{
-						label: "Building your container image 1",
+						Label: "Building your container image 1",
 						syncBuf: &SyncBuffer{
 							buf: *bytes.NewBufferString(`line1 from image1
 line2 from image1
@@ -64,7 +64,7 @@ line7 from image1`),
 						},
 					},
 					{
-						label: "Building your container image 2",
+						Label: "Building your container image 2",
 						syncBuf: &SyncBuffer{
 							buf: *bytes.NewBufferString(`line1 from image2
 line2 from image2
@@ -92,14 +92,14 @@ Building your container image 2
 			inLabeledTermPrinter: LabeledTermPrinter{
 				buffers: []*LabeledSyncBuffer{
 					{
-						label: "Building your container image 1",
+						Label: "Building your container image 1",
 						syncBuf: &SyncBuffer{
 							buf:  *bytes.NewBufferString(`line1 from image1`),
 							done: make(chan struct{}),
 						},
 					},
 					{
-						label: "Building your container image 2",
+						Label: "Building your container image 2",
 						syncBuf: &SyncBuffer{
 							buf:  *bytes.NewBufferString(`line1 from image2`),
 							done: make(chan struct{}),
@@ -144,7 +144,7 @@ func TestLabeledTermPrinter_PrintAll(t *testing.T) {
 			inLabeledTermPrinter: LabeledTermPrinter{
 				buffers: []*LabeledSyncBuffer{
 					{
-						label: "Building your container image 1",
+						Label: "Building your container image 1",
 						syncBuf: &SyncBuffer{
 							buf: *bytes.NewBufferString(`line1 from image1
 line2 from image1
@@ -153,7 +153,7 @@ line3 from image1`),
 						},
 					},
 					{
-						label: "Building your container image 2",
+						Label: "Building your container image 2",
 						syncBuf: &SyncBuffer{
 							buf: *bytes.NewBufferString(`line1 from image2
 line2 from image2

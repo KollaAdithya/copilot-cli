@@ -74,7 +74,7 @@ func (b *SyncBuffer) CopyToBuffer(r fileReader) error {
 
 // LabeledSyncBuffer is a struct that combines a SyncBuffer with a string label.
 type LabeledSyncBuffer struct {
-	label   string
+	Label   string
 	syncBuf *SyncBuffer
 }
 
@@ -88,7 +88,7 @@ func New(syncBuf *SyncBuffer) *LabeledSyncBuffer {
 // NewLabeledSyncBufferWithLabel creates and returns a new LabeledSyncBuffer with the given label and SyncBuffer.
 func NewWithLabel(label string, syncBuf *SyncBuffer) *LabeledSyncBuffer {
 	return &LabeledSyncBuffer{
-		label:   label,
+		Label:   label,
 		syncBuf: syncBuf,
 	}
 }
