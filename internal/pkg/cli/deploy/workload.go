@@ -443,7 +443,11 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 			if ltp.IsDone() {
 				return nil
 			}
-			time.Sleep(pollIntervalForBuildAndPush)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(pollIntervalForBuildAndPush):
+			}
 		}
 	})
 	if err := g.Wait(); err != nil {
