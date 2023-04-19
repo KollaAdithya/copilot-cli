@@ -118,7 +118,7 @@ type spinner interface {
 
 type labeledTermPrinter interface {
 	IsDone() bool
-	Print() error
+	Print()
 }
 
 // StackRuntimeConfiguration contains runtime configuration for a workload CloudFormation stack.
@@ -437,9 +437,7 @@ func (d *workloadDeployer) uploadContainerImages(out *UploadArtifactsOutput) err
 	ltp := d.labeledTermPrinter(os.Stderr, labeledBuffers, opts...)
 	g.Go(func() error {
 		for {
-			if err := ltp.Print(); err != nil {
-				return fmt.Errorf("print logs: %w", err)
-			}
+			ltp.Print()
 			if ltp.IsDone() {
 				return nil
 			}
