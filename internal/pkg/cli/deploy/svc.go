@@ -5,17 +5,23 @@
 package deploy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"regexp"
+	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws/session"
 	"golang.org/x/mod/semver"
+	"golang.org/x/sync/errgroup"
 
 	awscloudformation "github.com/aws/copilot-cli/internal/pkg/aws/cloudformation"
 	"github.com/aws/copilot-cli/internal/pkg/config"
+	"github.com/aws/copilot-cli/internal/pkg/deploy"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation"
 	"github.com/aws/copilot-cli/internal/pkg/term/color"
 	"github.com/aws/copilot-cli/internal/pkg/term/log"
@@ -66,15 +72,55 @@ func (d *svcDeployer) deploy(deployOptions Options, stackConfigOutput svcStackCo
 		opts = append(opts, awscloudformation.WithDisableRollback())
 	}
 	cmdRunAt := d.now()
-	if err := d.deployer.DeployService(stackConfigOutput.conf, d.resources.S3Bucket, opts...); err != nil {
-		var errEmptyCS *awscloudformation.ErrChangeSetEmpty
-		if !errors.As(err, &errEmptyCS) {
-			return fmt.Errorf("deploy service: %w", err)
+	eg, ctx := errgroup.WithContext(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	signalCh := make(chan os.Signal)
+	signal.Notify(signalCh, syscall.SIGINT)
+	eg.Go(func() error {
+		for {
+			select {
+			case <-signalCh:
+				cancel()
+				signal.Stop(signalCh)
+				close(signalCh)
+				isCreateInProgress, err := d.deployer.IsStackCreateInProgress(stackConfigOutput.conf.StackName())
+				if err != nil {
+					return err
+				}
+				if isCreateInProgress {
+					log.Infoln("recieved Interrupt, Deleting the stack", stackConfigOutput.conf.StackName())
+					return d.deployer.DeleteWorkload(deploy.DeleteWorkloadInput{
+						Name:             d.name,
+						AppName:          d.app.Name,
+						EnvName:          d.env.Name,
+						ExecutionRoleARN: d.env.ExecutionRoleARN,
+					})
+				}
+				return nil
+			case <-ctx.Done():
+				fmt.Println("context is done", ctx.Done())
+				return nil
+			}
 		}
-		if !deployOptions.ForceNewUpdate {
-			log.Warningln("Set --force to force an update for the service.")
-			return fmt.Errorf("deploy service: %w", err)
+	})
+	eg.Go(func() error {
+		if err := d.deployer.DeployService(ctx, stackConfigOutput.conf, d.resources.S3Bucket, opts...); err != nil {
+			var errEmptyCS *awscloudformation.ErrChangeSetEmpty
+			fmt.Println(errors.Is(err, context.Canceled))
+			if !errors.As(err, &errEmptyCS) {
+				return fmt.Errorf("deploy service: %w", err)
+			}
+			if !deployOptions.ForceNewUpdate {
+				log.Warningln("Set --force to force an update for the service.")
+				return fmt.Errorf("deploy service: %w", err)
+			}
 		}
+		cancel()
+		return nil
+	})
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 	// Force update the service if --force is set and the service is not updated by the CFN.
 	if deployOptions.ForceNewUpdate {

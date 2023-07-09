@@ -52,6 +52,10 @@ func (ss StackStatus) UpsertInProgress() bool {
 	return ss == cloudformation.StackStatusCreateInProgress || ss == cloudformation.StackStatusUpdateInProgress
 }
 
+func (ss StackStatus) CreateInProgress() bool {
+	return ss == cloudformation.StackStatusCreateInProgress
+}
+
 // IsSuccess returns true if the resource mutated successfully.
 func (ss StackStatus) IsSuccess() bool {
 	for _, success := range successStackStatuses {

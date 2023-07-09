@@ -4,9 +4,11 @@
 package cloudformation
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/copilot-cli/internal/pkg/aws/cloudformation"
 	"github.com/aws/copilot-cli/internal/pkg/deploy"
 	"github.com/aws/copilot-cli/internal/pkg/template/artifactpath"
@@ -15,7 +17,7 @@ import (
 // DeployService deploys a service stack and renders progress updates to out until the deployment is done.
 // If the service stack doesn't exist, then it creates the stack.
 // If the service stack already exists, it updates the stack.
-func (cf CloudFormation) DeployService(conf StackConfiguration, bucketName string, opts ...cloudformation.StackOption) error {
+func (cf CloudFormation) DeployService(ctx context.Context, conf StackConfiguration, bucketName string, opts ...cloudformation.StackOption) error {
 	templateURL, err := cf.uploadStackTemplateToS3(bucketName, conf)
 	if err != nil {
 		return err
@@ -27,7 +29,7 @@ func (cf CloudFormation) DeployService(conf StackConfiguration, bucketName strin
 	for _, opt := range opts {
 		opt(stack)
 	}
-	return cf.executeAndRenderChangeSet(cf.newUpsertChangeSetInput(cf.console, stack))
+	return cf.executeAndRenderChangeSet(ctx, cf.newUpsertChangeSetInput(cf.console, stack))
 }
 
 type uploadableStack interface {
@@ -68,4 +70,15 @@ func (cf CloudFormation) DeleteWorkload(in deploy.DeleteWorkloadInput) error {
 	return cf.deleteAndRenderStack(stackName, description, func() error {
 		return cf.cfnClient.DeleteAndWaitWithRoleARN(stackName, in.ExecutionRoleARN)
 	})
+}
+
+func (cf CloudFormation) IsStackCreateInProgress(stackName string) (bool, error) {
+	stackDescription, err := cf.cfnClient.Describe(stackName)
+	if err != nil {
+		return false, fmt.Errorf("describe stack %s: %w", stackName, err)
+	}
+	if cloudformation.StackStatus(aws.StringValue(stackDescription.StackStatus)).CreateInProgress() {
+		return true, nil
+	}
+	return false, nil
 }

@@ -312,7 +312,7 @@ func (cf CloudFormation) newUpsertChangeSetInput(w progress.FileWriter, stack *c
 	return in
 }
 
-func (cf CloudFormation) executeAndRenderChangeSet(in *executeAndRenderChangeSetInput) error {
+func (cf CloudFormation) executeAndRenderChangeSet(ctx context.Context, in *executeAndRenderChangeSetInput) error {
 	changeSetID, err := in.createChangeSet()
 	if err != nil {
 		return err
@@ -320,7 +320,7 @@ func (cf CloudFormation) executeAndRenderChangeSet(in *executeAndRenderChangeSet
 	if _, ok := cf.console.(*discardFile); ok { // If we don't have to render skip the additional network calls.
 		return nil
 	}
-	waitCtx, cancelWait := context.WithTimeout(context.Background(), waitForStackTimeout)
+	waitCtx, cancelWait := context.WithTimeout(ctx, waitForStackTimeout)
 	defer cancelWait()
 	g, ctx := errgroup.WithContext(waitCtx)
 

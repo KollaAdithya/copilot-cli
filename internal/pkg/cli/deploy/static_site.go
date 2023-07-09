@@ -4,6 +4,7 @@
 package deploy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -121,7 +122,7 @@ func (d *staticSiteDeployer) deploy(deployOptions Options, stackConfigOutput svc
 	if deployOptions.DisableRollback {
 		opts = append(opts, awscloudformation.WithDisableRollback())
 	}
-	if err := d.deployer.DeployService(stackConfigOutput.conf, d.resources.S3Bucket, opts...); err != nil {
+	if err := d.deployer.DeployService(context.Background(), stackConfigOutput.conf, d.resources.S3Bucket, opts...); err != nil {
 		return fmt.Errorf("deploy service: %w", err)
 	}
 	return nil

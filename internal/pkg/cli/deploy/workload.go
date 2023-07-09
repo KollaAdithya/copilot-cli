@@ -26,6 +26,7 @@ import (
 	"github.com/aws/copilot-cli/internal/pkg/aws/s3"
 	"github.com/aws/copilot-cli/internal/pkg/aws/sessions"
 	"github.com/aws/copilot-cli/internal/pkg/config"
+	"github.com/aws/copilot-cli/internal/pkg/deploy"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation/stack"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/upload/customresource"
@@ -104,7 +105,9 @@ type endpointGetter interface {
 }
 
 type serviceDeployer interface {
-	DeployService(conf cloudformation.StackConfiguration, bucketName string, opts ...awscloudformation.StackOption) error
+	DeployService(ctx context.Context, conf cloudformation.StackConfiguration, bucketName string, opts ...awscloudformation.StackOption) error
+	DeleteWorkload(in deploy.DeleteWorkloadInput) error
+	IsStackCreateInProgress(stackName string) (bool, error)
 }
 
 type deployedTemplateGetter interface {

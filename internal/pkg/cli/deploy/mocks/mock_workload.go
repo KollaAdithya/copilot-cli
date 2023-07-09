@@ -11,6 +11,7 @@ import (
 
 	addon "github.com/aws/copilot-cli/internal/pkg/addon"
 	cloudformation "github.com/aws/copilot-cli/internal/pkg/aws/cloudformation"
+	deploy "github.com/aws/copilot-cli/internal/pkg/deploy"
 	cloudformation0 "github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation"
 	dockerengine "github.com/aws/copilot-cli/internal/pkg/docker/dockerengine"
 	gomock "github.com/golang/mock/gomock"
@@ -325,10 +326,24 @@ func (m *MockserviceDeployer) EXPECT() *MockserviceDeployerMockRecorder {
 	return m.recorder
 }
 
-// DeployService mocks base method.
-func (m *MockserviceDeployer) DeployService(conf cloudformation0.StackConfiguration, bucketName string, opts ...cloudformation.StackOption) error {
+// DeleteWorkload mocks base method.
+func (m *MockserviceDeployer) DeleteWorkload(in deploy.DeleteWorkloadInput) error {
 	m.ctrl.T.Helper()
-	varargs := []interface{}{conf, bucketName}
+	ret := m.ctrl.Call(m, "DeleteWorkload", in)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteWorkload indicates an expected call of DeleteWorkload.
+func (mr *MockserviceDeployerMockRecorder) DeleteWorkload(in interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteWorkload", reflect.TypeOf((*MockserviceDeployer)(nil).DeleteWorkload), in)
+}
+
+// DeployService mocks base method.
+func (m *MockserviceDeployer) DeployService(ctx context.Context, conf cloudformation0.StackConfiguration, bucketName string, opts ...cloudformation.StackOption) error {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, conf, bucketName}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
@@ -338,10 +353,25 @@ func (m *MockserviceDeployer) DeployService(conf cloudformation0.StackConfigurat
 }
 
 // DeployService indicates an expected call of DeployService.
-func (mr *MockserviceDeployerMockRecorder) DeployService(conf, bucketName interface{}, opts ...interface{}) *gomock.Call {
+func (mr *MockserviceDeployerMockRecorder) DeployService(ctx, conf, bucketName interface{}, opts ...interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]interface{}{conf, bucketName}, opts...)
+	varargs := append([]interface{}{ctx, conf, bucketName}, opts...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeployService", reflect.TypeOf((*MockserviceDeployer)(nil).DeployService), varargs...)
+}
+
+// IsStackCreateInProgress mocks base method.
+func (m *MockserviceDeployer) IsStackCreateInProgress(stackName string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsStackCreateInProgress", stackName)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsStackCreateInProgress indicates an expected call of IsStackCreateInProgress.
+func (mr *MockserviceDeployerMockRecorder) IsStackCreateInProgress(stackName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsStackCreateInProgress", reflect.TypeOf((*MockserviceDeployer)(nil).IsStackCreateInProgress), stackName)
 }
 
 // MockdeployedTemplateGetter is a mock of deployedTemplateGetter interface.

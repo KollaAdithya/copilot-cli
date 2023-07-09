@@ -4,6 +4,7 @@
 package deploy
 
 import (
+	"context"
 	"fmt"
 
 	awscloudformation "github.com/aws/copilot-cli/internal/pkg/aws/cloudformation"
@@ -82,7 +83,7 @@ func (d *jobDeployer) DeployWorkload(in *DeployWorkloadInput) (ActionRecommender
 	if err != nil {
 		return nil, err
 	}
-	if err := d.deployer.DeployService(stackConfigOutput.conf, d.resources.S3Bucket, opts...); err != nil {
+	if err := d.deployer.DeployService(context.Background(), stackConfigOutput.conf, d.resources.S3Bucket, opts...); err != nil {
 		return nil, fmt.Errorf("deploy job: %w", err)
 	}
 	return noopActionRecommender{}, nil
