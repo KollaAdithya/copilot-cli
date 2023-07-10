@@ -108,6 +108,8 @@ type serviceDeployer interface {
 	DeployService(ctx context.Context, conf cloudformation.StackConfiguration, bucketName string, opts ...awscloudformation.StackOption) error
 	DeleteWorkload(in deploy.DeleteWorkloadInput) error
 	IsStackCreateInProgress(stackName string) (bool, error)
+	IsStackUpdateInProgress(stackName string) (bool, error)
+	CancelUpdateWorkload(stackName string) error
 }
 
 type deployedTemplateGetter interface {

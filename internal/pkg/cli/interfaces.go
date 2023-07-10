@@ -667,7 +667,7 @@ type workloadDeployer interface {
 	UploadArtifacts() (*clideploy.UploadArtifactsOutput, error)
 	GenerateCloudFormationTemplate(in *clideploy.GenerateCloudFormationTemplateInput) (
 		*clideploy.GenerateCloudFormationTemplateOutput, error)
-	DeployWorkload(in *clideploy.DeployWorkloadInput) (clideploy.ActionRecommender, error)
+	DeployWorkload(in *clideploy.DeployWorkloadInput) (clideploy.ActionRecommender, bool, bool, error)
 	IsServiceAvailableInRegion(region string) (bool, error)
 	templateDiffer
 }

@@ -124,17 +124,18 @@ func (d *workerSvcDeployer) GenerateCloudFormationTemplate(in *GenerateCloudForm
 }
 
 // DeployWorkload deploys a worker service using CloudFormation.
-func (d *workerSvcDeployer) DeployWorkload(in *DeployWorkloadInput) (ActionRecommender, error) {
+func (d *workerSvcDeployer) DeployWorkload(in *DeployWorkloadInput) (ActionRecommender, bool, bool, error) {
 	stackConfigOutput, err := d.stackConfiguration(&in.StackRuntimeConfiguration)
 	if err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
-	if err := d.deploy(in.Options, stackConfigOutput.svcStackConfigurationOutput); err != nil {
-		return nil, err
+	isSvcDeleted, isUpdateCanceled, err := d.deploy(in.Options, stackConfigOutput.svcStackConfigurationOutput)
+	if err != nil {
+		return nil, false, false, err
 	}
 	return &workerSvcDeployOutput{
 		subs: stackConfigOutput.subscriptions,
-	}, nil
+	}, isSvcDeleted, isUpdateCanceled, nil
 }
 
 func (d *workerSvcDeployOutput) buildWorkerQueueNames() string {

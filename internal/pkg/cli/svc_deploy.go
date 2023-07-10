@@ -80,6 +80,8 @@ type deploySvcOpts struct {
 	rootUserARN       string
 	deployRecs        clideploy.ActionRecommender
 	noDeploy          bool
+	isSvcDeleted      bool
+	isUpdateCanceled  bool
 }
 
 func newSvcDeployOpts(vars deployWkldVars) (*deploySvcOpts, error) {
@@ -277,7 +279,7 @@ func (o *deploySvcOpts) Execute() error {
 			return nil
 		}
 	}
-	deployRecs, err := deployer.DeployWorkload(&clideploy.DeployWorkloadInput{
+	deployRecs, isSvcDeleted, isUpdateCanceled, err := deployer.DeployWorkload(&clideploy.DeployWorkloadInput{
 		StackRuntimeConfiguration: clideploy.StackRuntimeConfiguration{
 			ImageDigests:              uploadOut.ImageDigests,
 			EnvFileARNs:               uploadOut.EnvFileARNs,
@@ -307,13 +309,23 @@ After fixing the deployment, you can:
 		return fmt.Errorf("deploy service %s to environment %s: %w", o.name, o.envName, err)
 	}
 	o.deployRecs = deployRecs
-	log.Successf("Deployed service %s.\n", color.HighlightUserInput(o.name))
+	o.isSvcDeleted = isSvcDeleted
+	o.isUpdateCanceled = isUpdateCanceled
+	if !o.isSvcDeleted && !o.isUpdateCanceled {
+		log.Successf("Deployed service %s.\n", color.HighlightUserInput(o.name))
+	}
+	if o.isUpdateCanceled {
+		log.Successf("Rollbacked your sercice %s to previous configuration.\n", color.HighlightUserInput(o.name))
+	}
 	return nil
 }
 
 // RecommendActions returns follow-up actions the user can take after successfully executing the command.
 func (o *deploySvcOpts) RecommendActions() error {
 	if o.noDeploy {
+		return nil
+	}
+	if o.isSvcDeleted {
 		return nil
 	}
 	var recommendations []string

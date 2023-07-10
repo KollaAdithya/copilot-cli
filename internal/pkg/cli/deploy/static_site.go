@@ -104,15 +104,15 @@ func (d *staticSiteDeployer) GenerateCloudFormationTemplate(in *GenerateCloudFor
 }
 
 // DeployWorkload deploys a static site service using CloudFormation.
-func (d *staticSiteDeployer) DeployWorkload(in *DeployWorkloadInput) (ActionRecommender, error) {
+func (d *staticSiteDeployer) DeployWorkload(in *DeployWorkloadInput) (ActionRecommender, bool, bool, error) {
 	conf, err := d.stackConfiguration(&in.StackRuntimeConfiguration)
 	if err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
 	if err := d.deploy(in.Options, svcStackConfigurationOutput{conf: conf}); err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
-	return noopActionRecommender{}, nil
+	return noopActionRecommender{}, false, false, nil
 }
 
 func (d *staticSiteDeployer) deploy(deployOptions Options, stackConfigOutput svcStackConfigurationOutput) error {

@@ -224,7 +224,7 @@ func (o *deployJobOpts) Execute() error {
 			return nil
 		}
 	}
-	if _, err = deployer.DeployWorkload(&deploy.DeployWorkloadInput{
+	if _, _, _, err = deployer.DeployWorkload(&deploy.DeployWorkloadInput{
 		StackRuntimeConfiguration: deploy.StackRuntimeConfiguration{
 			ImageDigests:       uploadOut.ImageDigests,
 			EnvFileARNs:        uploadOut.EnvFileARNs,

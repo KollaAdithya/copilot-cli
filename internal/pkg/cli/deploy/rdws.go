@@ -107,17 +107,18 @@ func (d *rdwsDeployer) GenerateCloudFormationTemplate(in *GenerateCloudFormation
 }
 
 // DeployWorkload deploys a request driven web service using CloudFormation.
-func (d *rdwsDeployer) DeployWorkload(in *DeployWorkloadInput) (ActionRecommender, error) {
+func (d *rdwsDeployer) DeployWorkload(in *DeployWorkloadInput) (ActionRecommender, bool, bool, error) {
 	stackConfigOutput, err := d.stackConfiguration(&in.StackRuntimeConfiguration)
 	if err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
-	if err := d.deploy(in.Options, stackConfigOutput.svcStackConfigurationOutput); err != nil {
-		return nil, err
+	isSvcDeleted, isUpdateCanceled, err := d.deploy(in.Options, stackConfigOutput.svcStackConfigurationOutput)
+	if err != nil {
+		return nil, false, false, err
 	}
 	return &rdwsDeployOutput{
 		rdwsAlias: stackConfigOutput.rdSvcAlias,
-	}, nil
+	}, isSvcDeleted, isUpdateCanceled, nil
 }
 
 type rdwsStackConfigurationOutput struct {

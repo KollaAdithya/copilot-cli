@@ -64,7 +64,7 @@ func newSvcDeployer(in *WorkloadDeployerInput) (*svcDeployer, error) {
 	}, nil
 }
 
-func (d *svcDeployer) deploy(deployOptions Options, stackConfigOutput svcStackConfigurationOutput) error {
+func (d *svcDeployer) deploy(deployOptions Options, stackConfigOutput svcStackConfigurationOutput) (bool, bool, error) {
 	opts := []awscloudformation.StackOption{
 		awscloudformation.WithRoleARN(d.env.ExecutionRoleARN),
 	}
@@ -77,6 +77,7 @@ func (d *svcDeployer) deploy(deployOptions Options, stackConfigOutput svcStackCo
 	defer cancel()
 	signalCh := make(chan os.Signal)
 	signal.Notify(signalCh, syscall.SIGINT)
+	var isSvcDeleted, isUpdateCanceled bool
 	eg.Go(func() error {
 		for {
 			select {
@@ -89,7 +90,8 @@ func (d *svcDeployer) deploy(deployOptions Options, stackConfigOutput svcStackCo
 					return err
 				}
 				if isCreateInProgress {
-					log.Infoln("recieved Interrupt, Deleting the stack", stackConfigOutput.conf.StackName())
+					isSvcDeleted = true
+					log.Infof(color.Red.Sprintf("Received Interrupt for Ctrl-C.\nPressing Ctrl-C again will exit immediately but the deletion of stack %s still happens\n", stackConfigOutput.conf.StackName()))
 					return d.deployer.DeleteWorkload(deploy.DeleteWorkloadInput{
 						Name:             d.name,
 						AppName:          d.app.Name,
@@ -97,17 +99,28 @@ func (d *svcDeployer) deploy(deployOptions Options, stackConfigOutput svcStackCo
 						ExecutionRoleARN: d.env.ExecutionRoleARN,
 					})
 				}
+				isUpdateInProgress, err := d.deployer.IsStackUpdateInProgress(stackConfigOutput.conf.StackName())
+				if err != nil {
+					return err
+				}
+				if isUpdateInProgress {
+					isUpdateCanceled = true
+					log.Infof(color.Red.Sprintf("Received Interrupt for Ctrl-C.\nPressing Ctrl-C again will exit immediately but note that the stack %s rollback will continue unaffected\n", stackConfigOutput.conf.StackName()))
+					return d.deployer.CancelUpdateWorkload(stackConfigOutput.conf.StackName())
+				}
 				return nil
 			case <-ctx.Done():
-				fmt.Println("context is done", ctx.Done())
 				return nil
 			}
 		}
 	})
 	eg.Go(func() error {
+		defer cancel()
 		if err := d.deployer.DeployService(ctx, stackConfigOutput.conf, d.resources.S3Bucket, opts...); err != nil {
 			var errEmptyCS *awscloudformation.ErrChangeSetEmpty
-			fmt.Println(errors.Is(err, context.Canceled))
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			if !errors.As(err, &errEmptyCS) {
 				return fmt.Errorf("deploy service: %w", err)
 			}
@@ -116,28 +129,27 @@ func (d *svcDeployer) deploy(deployOptions Options, stackConfigOutput svcStackCo
 				return fmt.Errorf("deploy service: %w", err)
 			}
 		}
-		cancel()
 		return nil
 	})
 	if err := eg.Wait(); err != nil {
-		return err
+		return isSvcDeleted, isUpdateCanceled, err
 	}
 	// Force update the service if --force is set and the service is not updated by the CFN.
 	if deployOptions.ForceNewUpdate {
 		lastUpdatedAt, err := stackConfigOutput.svcUpdater.LastUpdatedAt(d.app.Name, d.env.Name, d.name)
 		if err != nil {
-			return fmt.Errorf("get the last updated deployment time for %s: %w", d.name, err)
+			return isSvcDeleted, isUpdateCanceled, fmt.Errorf("get the last updated deployment time for %s: %w", d.name, err)
 		}
 		if cmdRunAt.After(lastUpdatedAt) {
 			if err := d.forceDeploy(&forceDeployInput{
 				spinner:    d.spinner,
 				svcUpdater: stackConfigOutput.svcUpdater,
 			}); err != nil {
-				return err
+				return isSvcDeleted, isUpdateCanceled, err
 			}
 		}
 	}
-	return nil
+	return isSvcDeleted, isUpdateCanceled, nil
 }
 
 type svcStackConfigurationOutput struct {

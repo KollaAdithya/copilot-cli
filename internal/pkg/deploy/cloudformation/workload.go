@@ -82,3 +82,25 @@ func (cf CloudFormation) IsStackCreateInProgress(stackName string) (bool, error)
 	}
 	return false, nil
 }
+
+func (cf CloudFormation) IsStackUpdateInProgress(stackName string) (bool, error) {
+	stackDescription, err := cf.cfnClient.Describe(stackName)
+	if err != nil {
+		return false, fmt.Errorf("describe stack %s: %w", stackName, err)
+	}
+	if cloudformation.StackStatus(aws.StringValue(stackDescription.StackStatus)).UpdateInProgress() {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (cf CloudFormation) CancelUpdateWorkload(stackName string) error {
+	descr, err := cf.cfnClient.Describe(stackName)
+	if err != nil {
+		return nil
+	}
+	stackDescription := fmt.Sprintf("Canceling the update for stack %s", stackName)
+	return cf.cancelUpdateAndRender(stackName, stackDescription, aws.StringValue(descr.ChangeSetId), func() error {
+		return cf.cfnClient.CancelUpdateStack(stackName)
+	})
+}

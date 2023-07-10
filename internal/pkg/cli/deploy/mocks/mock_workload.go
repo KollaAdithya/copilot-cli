@@ -326,6 +326,20 @@ func (m *MockserviceDeployer) EXPECT() *MockserviceDeployerMockRecorder {
 	return m.recorder
 }
 
+// CancelUpdateWorkload mocks base method.
+func (m *MockserviceDeployer) CancelUpdateWorkload(stackName string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CancelUpdateWorkload", stackName)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CancelUpdateWorkload indicates an expected call of CancelUpdateWorkload.
+func (mr *MockserviceDeployerMockRecorder) CancelUpdateWorkload(stackName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CancelUpdateWorkload", reflect.TypeOf((*MockserviceDeployer)(nil).CancelUpdateWorkload), stackName)
+}
+
 // DeleteWorkload mocks base method.
 func (m *MockserviceDeployer) DeleteWorkload(in deploy.DeleteWorkloadInput) error {
 	m.ctrl.T.Helper()
@@ -372,6 +386,21 @@ func (m *MockserviceDeployer) IsStackCreateInProgress(stackName string) (bool, e
 func (mr *MockserviceDeployerMockRecorder) IsStackCreateInProgress(stackName interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsStackCreateInProgress", reflect.TypeOf((*MockserviceDeployer)(nil).IsStackCreateInProgress), stackName)
+}
+
+// IsStackUpdateInProgress mocks base method.
+func (m *MockserviceDeployer) IsStackUpdateInProgress(stackName string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsStackUpdateInProgress", stackName)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsStackUpdateInProgress indicates an expected call of IsStackUpdateInProgress.
+func (mr *MockserviceDeployerMockRecorder) IsStackUpdateInProgress(stackName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsStackUpdateInProgress", reflect.TypeOf((*MockserviceDeployer)(nil).IsStackUpdateInProgress), stackName)
 }
 
 // MockdeployedTemplateGetter is a mock of deployedTemplateGetter interface.

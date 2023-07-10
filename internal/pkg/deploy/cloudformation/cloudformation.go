@@ -115,6 +115,7 @@ type cfnClient interface {
 	Outputs(stack *cloudformation.Stack) (map[string]string, error)
 	StackResources(name string) ([]*cloudformation.StackResource, error)
 	Metadata(opts cloudformation.MetadataOpts) (string, error)
+	CancelUpdateStack(stackName string) error
 
 	// Methods vended by the aws sdk struct.
 	DescribeStackEvents(*sdkcloudformation.DescribeStackEventsInput) (*sdkcloudformation.DescribeStackEventsOutput, error)
@@ -338,6 +339,28 @@ func (cf CloudFormation) executeAndRenderChangeSet(ctx context.Context, in *exec
 	if err := cf.errOnFailedStack(in.stackName); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (cf CloudFormation) cancelUpdateAndRender(stackName, stackDescription, changeSetID string, cancelFn func() error) error {
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), waitForStackTimeout)
+	defer cancelWait()
+	g, ctx := errgroup.WithContext(waitCtx)
+	g.Go(cancelFn)
+	renderer, err := cf.createChangeSetRenderer(g, ctx, changeSetID, stackName, stackDescription, progress.RenderOptions{})
+	if err != nil {
+		return err
+	}
+	g.Go(func() error {
+		_, err := progress.Render(ctx, progress.NewTabbedFileWriter(cf.console), renderer)
+		return err
+	})
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	// if err := cf.errOnFailedStack(stackName); err != nil {
+	// 	return err
+	// }
 	return nil
 }
 
