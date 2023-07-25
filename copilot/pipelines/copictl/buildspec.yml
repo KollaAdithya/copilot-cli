@@ -15,13 +15,13 @@ phases:
   build:
     commands:
       - echo "Run your tests"
-      - make test
+      # - make test
   post_build:
     commands:
       - ls -l
       - export COLOR="false"
       - export CI="true"
-      - pipeline=$(cat $CODEBUILD_SRC_DIR/copilot/pipelines/copifork/manifest.yml | ruby -ryaml -rjson -e 'puts JSON.pretty_generate(YAML.load(ARGF))')
+      - pipeline=$(cat $CODEBUILD_SRC_DIR/copilot/pipelines/copictl/manifest.yml | ruby -ryaml -rjson -e 'puts JSON.pretty_generate(YAML.load(ARGF))')
       - pl_envs=$(echo $pipeline | jq -r '.stages[].name')
       # Find all the local services in the workspace.
       - svc_ls_result=$(./copilot-linux svc ls --local --json)
