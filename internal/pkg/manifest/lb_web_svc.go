@@ -214,6 +214,15 @@ func (s *LoadBalancedWebService) EnvFiles() map[string]string {
 	return envFiles(s.Name, s.TaskConfig, s.Logging, s.Sidecars)
 }
 
+type ContainerDependency struct {
+	IsEssential bool
+	DependsOn   DependsOn
+}
+
+func (s *LoadBalancedWebService) ContainerDependencies() map[string]ContainerDependency {
+	return containerDependencies(aws.StringValue(s.Name), s.ImageConfig.Image, s.Logging, s.Sidecars)
+}
+
 func (s *LoadBalancedWebService) subnets() *SubnetListOrArgs {
 	return &s.Network.VPC.Placement.Subnets
 }

@@ -8,12 +8,13 @@ package deploy
 import (
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/copilot-cli/internal/pkg/config"

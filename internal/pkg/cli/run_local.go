@@ -37,6 +37,7 @@ import (
 	"github.com/aws/copilot-cli/internal/pkg/docker/dockerengine"
 	"github.com/aws/copilot-cli/internal/pkg/ecs"
 	"github.com/aws/copilot-cli/internal/pkg/exec"
+	"github.com/aws/copilot-cli/internal/pkg/graph"
 	"github.com/aws/copilot-cli/internal/pkg/manifest"
 	"github.com/aws/copilot-cli/internal/pkg/repository"
 	termcolor "github.com/aws/copilot-cli/internal/pkg/term/color"
@@ -71,23 +72,23 @@ type runLocalVars struct {
 type runLocalOpts struct {
 	runLocalVars
 
-	sel             deploySelector
-	ecsLocalClient  ecsLocalClient
-	ssm             secretGetter
-	secretsManager  secretGetter
-	sessProvider    sessionProvider
-	sess            *session.Session
-	envSess         *session.Session
-	targetEnv       *config.Environment
-	targetApp       *config.Application
-	store           store
-	ws              wsWlDirReader
-	cmd             execRunner
-	dockerEngine    dockerEngineRunner
-	repository      repositoryService
-	containerSuffix string
-	newColor        func() *color.Color
-	prog            progress
+	sel            deploySelector
+	ecsLocalClient ecsLocalClient
+	ssm            secretGetter
+	secretsManager secretGetter
+	sessProvider   sessionProvider
+	sess           *session.Session
+	envSess        *session.Session
+	targetEnv      *config.Environment
+	targetApp      *config.Application
+	store          store
+	ws             wsWlDirReader
+	cmd            execRunner
+	dockerEngine   dockerEngineRunner
+	repository     repositoryService
+	// containerSuffix string
+	newColor func() *color.Color
+	prog     progress
 
 	buildContainerImages func(mft manifest.DynamicWorkload) (map[string]string, error)
 	configureClients     func(o *runLocalOpts) error
@@ -237,7 +238,6 @@ func (o *runLocalOpts) validateAndAskWkldEnvName() error {
 	o.wkldName = deployedWorkload.Name
 	o.envName = deployedWorkload.Env
 	o.wkldType = deployedWorkload.Type
-	o.containerSuffix = o.getContainerSuffix()
 	return nil
 }
 
@@ -301,6 +301,15 @@ func (o *runLocalOpts) Execute() error {
 			containerURIs[name] = aws.StringValue(container.Image)
 		}
 	}
+	dependencies := containerDependency(mft.Manifest())
+	deps := make(map[string]graph.ContainerDependency)
+	for k, v := range dependencies {
+		deps[k] = graph.ContainerDependency{
+			Essential: v.IsEssential,
+			DependsOn: graph.DependsOn(v.DependsOn),
+		}
+	}
+	log.Infoln("dependencies are", dependencies)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -341,11 +350,30 @@ func (o *runLocalOpts) Execute() error {
 			signal.Stop(sigCh)
 			fmt.Printf("\nStopping containers...\n\n")
 		}
+		return graph.InReverseDependencyOrder(context.Background(), deps, func(ctx context.Context, name string) error {
+			o.prog.Start(fmt.Sprintf("Stopping %q", name))
+			err := o.cleanUpContainer(context.Background(), name)
+			if err != nil {
+				return err
+			}
+			o.prog.Stop(log.Ssuccessf("Cleaned up %q\n", name))
+			return nil
+		})
 
-		return o.cleanUpContainers(context.Background(), containerURIs)
 	})
 
 	return g.Wait()
+}
+
+func containerDependency(unmarshaledManifest interface{}) map[string]manifest.ContainerDependency {
+	type containerDependency interface {
+		ContainerDependencies() map[string]manifest.ContainerDependency
+	}
+	mf, ok := unmarshaledManifest.(containerDependency)
+	if ok {
+		return mf.ContainerDependencies()
+	}
+	return nil
 }
 
 func (o *runLocalOpts) getContainerSuffix() string {
@@ -358,10 +386,9 @@ func (o *runLocalOpts) runPauseContainer(ctx context.Context, ports map[string]s
 	for k, v := range ports {
 		flippedPorts[v] = k
 	}
-	containerNameWithSuffix := fmt.Sprintf("%s-%s", pauseContainerName, o.containerSuffix)
 	runOptions := &dockerengine.RunOptions{
 		ImageURI:       pauseContainerURI,
-		ContainerName:  containerNameWithSuffix,
+		ContainerName:  pauseContainerName,
 		ContainerPorts: flippedPorts,
 		Command:        []string{"sleep", "infinity"},
 		LogOptions: dockerengine.RunLogOptions{
@@ -382,7 +409,7 @@ func (o *runLocalOpts) runPauseContainer(ctx context.Context, ports map[string]s
 	// go routine to check if pause container is running
 	go func() {
 		for {
-			isRunning, err := o.dockerEngine.IsContainerRunning(containerNameWithSuffix)
+			isRunning, err := o.dockerEngine.IsContainerRunning(pauseContainerName)
 			if err != nil {
 				errCh <- fmt.Errorf("check if container is running: %w", err)
 				return
@@ -422,10 +449,10 @@ func (o *runLocalOpts) runContainers(ctx context.Context, containerURIs map[stri
 		g.Go(func() error {
 			runOptions := &dockerengine.RunOptions{
 				ImageURI:         uri,
-				ContainerName:    fmt.Sprintf("%s-%s", name, o.containerSuffix),
+				ContainerName:    name,
 				Secrets:          secrets,
 				EnvVars:          vars,
-				ContainerNetwork: fmt.Sprintf("%s-%s", pauseContainerName, o.containerSuffix),
+				ContainerNetwork: pauseContainerName,
 				LogOptions: dockerengine.RunLogOptions{
 					Color:      o.newColor(),
 					LinePrefix: fmt.Sprintf("[%s] ", name),
@@ -441,37 +468,44 @@ func (o *runLocalOpts) runContainers(ctx context.Context, containerURIs map[stri
 	return g.Wait()
 }
 
-func (o *runLocalOpts) cleanUpContainers(ctx context.Context, containerURIs map[string]string) error {
+func (o *runLocalOpts) cleanUpContainer(ctx context.Context, name string) error {
 	cleanUp := func(id string) error {
-		o.prog.Start(fmt.Sprintf("Stopping %q", id))
+		// o.prog.Start(fmt.Sprintf("Stopping %q", id))
 		if err := o.dockerEngine.Stop(id); err != nil {
-			o.prog.Stop(log.Serrorf("Failed to stop %q\n", id))
+			// o.prog.Stop(log.Serrorf("Failed to stop %q\n", id))
 			return fmt.Errorf("stop: %w", err)
 		}
 
-		o.prog.Start(fmt.Sprintf("Removing %q", id))
+		// o.prog.Start(fmt.Sprintf("Removing %q", id))
 		if err := o.dockerEngine.Rm(id); err != nil {
-			o.prog.Stop(log.Serrorf("Failed to remove %q\n", id))
+			// o.prog.Stop(log.Serrorf("Failed to remove %q\n", id))
 			return fmt.Errorf("rm: %w", err)
 		}
-
-		o.prog.Stop(log.Ssuccessf("Cleaned up %q\n", id))
+		// log.Infoln("coming here in remove")
+		// o.prog.Stop(log.Ssuccessf("Cleaned up %q\n", id))
 		return nil
 	}
 
 	var errs []error
+	// return graph.InReverseDependencyOrder(ctx, deps, func(ctx context.Context, s string) error {
+	// 	k := containerURIs[s]
+	// 	l := make(map[string]string)
+	// 	l[s] = k
+	// 	return o.cleanUpContainers(context.Background(), l)
+	// })
 
-	for name := range containerURIs {
-		ctr := fmt.Sprintf("%s-%s", name, o.containerSuffix)
-		if err := cleanUp(ctr); err != nil {
-			errs = append(errs, fmt.Errorf("clean up %q: %w", ctr, err))
-		}
+	log.Infoln("name is", name)
+	// o.prog.Start(fmt.Sprintf("Stopping %q", name))
+	if err := cleanUp(name); err != nil {
+		return err
 	}
+	// o.prog.Stop(log.Ssuccessf("Cleaned up %q\n", name))
+	// ctr := fmt.Sprintf("%s-%s", name, o.containerSuffix)
 
-	pauseCtr := fmt.Sprintf("%s-%s", pauseContainerName, o.containerSuffix)
-	if err := cleanUp(pauseCtr); err != nil {
-		errs = append(errs, fmt.Errorf("clean up %q: %w", pauseCtr, err))
-	}
+	// pauseCtr := pauseContainerName
+	// if err := cleanUp(pauseCtr); err != nil {
+	// 	errs = append(errs, fmt.Errorf("clean up %q: %w", pauseCtr, err))
+	// }
 
 	if len(errs) > 0 {
 		sort.Slice(errs, func(i, j int) bool {
@@ -481,6 +515,32 @@ func (o *runLocalOpts) cleanUpContainers(ctx context.Context, containerURIs map[
 	}
 	return nil
 }
+
+// func (s *composeService) removeContainers(ctx context.Context, w progress.Writer, containers []moby.Container, timeout *time.Duration, volumes bool) error {
+// 	eg, _ := errgroup.WithContext(ctx)
+// 	for _, container := range containers {
+// 		container := container
+// 		eg.Go(func() error {
+// 			eventName := getContainerProgressName(container)
+// 			err := s.stopContainer(ctx, w, container, timeout)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			w.Event(progress.RemovingEvent(eventName))
+// 			err = s.apiClient().ContainerRemove(ctx, container.ID, moby.ContainerRemoveOptions{
+// 				Force:         true,
+// 				RemoveVolumes: volumes,
+// 			})
+// 			if err != nil && !errdefs.IsNotFound(err) && !errdefs.IsConflict(err) {
+// 				w.Event(progress.ErrorMessageEvent(eventName, "Error while Removing"))
+// 				return err
+// 			}
+// 			w.Event(progress.RemovedEvent(eventName))
+// 			return nil
+// 		})
+// 	}
+// 	return eg.Wait()
+// }
 
 type containerEnv map[string]envVarValue
 

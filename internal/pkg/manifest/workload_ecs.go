@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/copilot-cli/internal/pkg/docker/dockerengine"
+	"github.com/aws/copilot-cli/internal/pkg/term/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -428,6 +429,25 @@ func envFiles(name *string, tc TaskConfig, lc Logging, sc map[string]*SidecarCon
 	// If the Firelens Sidecar Pattern has an env file specified, get it as well.
 	envFiles[FirelensContainerName] = aws.StringValue(lc.EnvFile)
 	return envFiles
+}
+
+func containerDependencies(name string, img Image, lc Logging, sc map[string]*SidecarConfig) map[string]ContainerDependency {
+	containerDependencies := make(map[string]ContainerDependency)
+	containerDependencies[name] = ContainerDependency{
+		DependsOn:   img.DependsOn,
+		IsEssential: true,
+	}
+	if !lc.IsEmpty() {
+		containerDependencies[FirelensContainerName] = ContainerDependency{}
+	}
+	for name, config := range sc {
+		containerDependencies[name] = ContainerDependency{
+			DependsOn:   config.DependsOn,
+			IsEssential: config.Essential == nil || aws.BoolValue(config.Essential),
+		}
+	}
+	log.Infoln("dependencies are", containerDependencies)
+	return containerDependencies
 }
 
 func buildArgs(contextDir string, buildArgs map[string]*DockerBuildArgs, sc map[string]*SidecarConfig) (map[string]*DockerBuildArgs, error) {
