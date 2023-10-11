@@ -4,6 +4,14 @@
 // Package graph provides functionality for directed graphs.
 package graph
 
+import (
+	"context"
+	"sync"
+
+	"github.com/aws/copilot-cli/internal/pkg/term/log"
+	"golang.org/x/sync/errgroup"
+)
+
 // vertexStatus denotes the visiting status of a vertex when running DFS in a graph.
 type vertexStatus int
 
@@ -17,6 +25,8 @@ const (
 type Graph[V comparable] struct {
 	vertices  map[V]neighbors[V] // Adjacency list for each vertex.
 	inDegrees map[V]int          // Number of incoming edges for each vertex.
+	status    map[V]string
+	lock      sync.RWMutex
 }
 
 // Edge represents one edge of a directed graph.
@@ -41,8 +51,21 @@ func New[V comparable](vertices ...V) *Graph[V] {
 	}
 }
 
+type GraphOption[V comparable] func(g *Graph[V])
+
+func WithStatus[V comparable](status string) func(g *Graph[V]) {
+	return func(g *Graph[V]) {
+		g.status = make(map[V]string)
+		for vertex := range g.vertices {
+			g.status[vertex] = status
+		}
+	}
+}
+
 // Neighbors returns the list of connected vertices from vtx.
 func (g *Graph[V]) Neighbors(vtx V) []V {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 	neighbors, ok := g.vertices[vtx]
 	if !ok {
 		return nil
@@ -58,6 +81,8 @@ func (g *Graph[V]) Neighbors(vtx V) []V {
 
 // Add adds a connection between two vertices.
 func (g *Graph[V]) Add(edge Edge[V]) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 	from, to := edge.From, edge.To
 	if _, ok := g.vertices[from]; !ok {
 		g.vertices[from] = make(neighbors[V])
@@ -99,6 +124,8 @@ type findCycleTempVars[V comparable] struct {
 
 // IsAcyclic checks if the graph is acyclic. If not, return the first detected cycle.
 func (g *Graph[V]) IsAcyclic() ([]V, bool) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 	var cycle []V
 	status := make(map[V]vertexStatus)
 	for vertex := range g.vertices {
@@ -215,4 +242,261 @@ func TopologicalOrder[V comparable](digraph *Graph[V]) (*TopologicalSorter[V], e
 	}
 	topo.traverse(digraph)
 	return topo, nil
+}
+
+type ComponentData[V comparable] struct {
+	Nodes []V
+	Ranks map[V]int
+}
+
+func GetConnectedComponentsData[V comparable](g *Graph[V]) []ComponentData[V] {
+	visited := make(map[V]bool)
+	componentsData := []ComponentData[V]{}
+
+	for v := range g.vertices {
+		if !visited[v] {
+			componentNodes := []V{}
+			dfsCollect(g, v, visited, &componentNodes)
+
+			subGraph := New[V](componentNodes...)
+			for _, node := range componentNodes {
+				for _, neighbor := range g.Neighbors(node) {
+					subGraph.Add(Edge[V]{node, neighbor})
+				}
+			}
+
+			topoSorter, _ := TopologicalOrder[V](subGraph)
+			ranks := make(map[V]int)
+			for _, node := range componentNodes {
+				rank, _ := topoSorter.Rank(node)
+				ranks[node] = rank
+			}
+
+			componentsData = append(componentsData, ComponentData[V]{componentNodes, ranks})
+		}
+	}
+	return componentsData
+}
+
+func dfsCollect[V comparable](g *Graph[V], v V, visited map[V]bool, nodes *[]V) {
+	visited[v] = true
+	*nodes = append(*nodes, v)
+	for _, neighbor := range g.Neighbors(v) {
+		if !visited[neighbor] {
+			dfsCollect(g, neighbor, visited, nodes)
+		}
+	}
+}
+
+// InDependencyOrder applies the function to the vertices of the graph taking into account the dependency order.
+// The function visits vertices in a topological order based on their dependencies.
+func (g *Graph[V]) InDependencyOrder(ctx context.Context, fn func(ctx context.Context, v V) error, adjacentvertexStatusToSkip, targetvertexStatus string, eg *errgroup.Group, options ...func(*graphTraversal[V])) error {
+	t := upDirectionTraversal(fn, adjacentvertexStatusToSkip, targetvertexStatus)
+	for _, option := range options {
+		option(t)
+	}
+	// log.Infoln("inital vertre status", g.status)
+	return t.visit(ctx, g, eg)
+}
+
+func (g *Graph[V]) InReverseDependencyOrder(ctx context.Context, fn func(ctx context.Context, v V) error, adjacentvertexStatusToSkip, targetvertexStatus string, eg *errgroup.Group, options ...func(*graphTraversal[V])) error {
+	t := downDirectionTraversal(fn, adjacentvertexStatusToSkip, targetvertexStatus)
+	for _, option := range options {
+		option(t)
+	}
+	return t.visit(ctx, g, eg)
+}
+
+type graphTraversal[V comparable] struct {
+	mu                         sync.RWMutex
+	seen                       map[V]struct{}
+	ignored                    map[V]struct{}
+	extremityvertexsFn         func(*Graph[V]) []V
+	adjacentvertexsFn          func(*Graph[V], V) []V
+	filterAdjacentFnByStatus   func(*Graph[V], V, string) []V
+	targetvertexStatus         string
+	adjacentvertexStatusToSkip string
+	visitorFn                  func(context.Context, V) error
+}
+
+func upDirectionTraversal[V comparable](visitorFn func(context.Context, V) error, adjacentvertexStatusToSkip, targetvertexStatus string) *graphTraversal[V] {
+	return &graphTraversal[V]{
+		extremityvertexsFn:         func(g *Graph[V]) []V { return getLeaves(g) },
+		adjacentvertexsFn:          func(g *Graph[V], vtx V) []V { return getParents(g, vtx) },
+		filterAdjacentFnByStatus:   func(g *Graph[V], vtx V, status string) []V { return filterChildren(g, vtx, status) },
+		adjacentvertexStatusToSkip: adjacentvertexStatusToSkip,
+		targetvertexStatus:         targetvertexStatus,
+		visitorFn:                  visitorFn,
+	}
+}
+
+func downDirectionTraversal[V comparable](visitorFn func(context.Context, V) error, adjacentvertexStatusToSkip, targetvertexStatus string) *graphTraversal[V] {
+	return &graphTraversal[V]{
+		extremityvertexsFn:         func(g *Graph[V]) []V { return getRoots(g) },
+		adjacentvertexsFn:          func(g *Graph[V], vtx V) []V { return getChildren(g, vtx) },
+		filterAdjacentFnByStatus:   func(g *Graph[V], vtx V, status string) []V { return filterParents(g, vtx, status) },
+		adjacentvertexStatusToSkip: adjacentvertexStatusToSkip,
+		targetvertexStatus:         targetvertexStatus,
+		visitorFn:                  visitorFn,
+	}
+}
+
+func (t *graphTraversal[V]) visit(ctx context.Context, graph *Graph[V], eg *errgroup.Group) error {
+	expect := len(graph.vertices)
+	// log.Infoln("len of vertices", expect)
+	if expect == 0 {
+		return nil
+	}
+
+	// eg, ctx := errgroup.WithContext(ctx)
+	vertexCh := make(chan V, expect)
+	defer close(vertexCh)
+
+	eg.Go(func() error {
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case vertex := <-vertexCh:
+				expect--
+				if expect == 0 {
+					return nil
+				}
+				adjvertexs := t.adjacentvertexsFn(graph, vertex)
+				// log.Infoln("adjvertexs are--->", adjvertexs)
+				t.run(ctx, graph, eg, adjvertexs, vertexCh)
+			}
+		}
+	})
+
+	vertexs := t.extremityvertexsFn(graph)
+	t.run(ctx, graph, eg, vertexs, vertexCh)
+	return eg.Wait()
+}
+
+func (t *graphTraversal[V]) run(ctx context.Context, graph *Graph[V], eg *errgroup.Group, vertexs []V, vertexCh chan V) {
+	for _, vertex := range vertexs {
+		// Don't start this vertex yet if all of its children have
+		// not been started yet.
+		if len(t.filterAdjacentFnByStatus(graph, vertex, t.adjacentvertexStatusToSkip)) != 0 {
+			// log.Infoln("all adjacent status passed")
+			continue
+		}
+
+		vertex := vertex
+		if !t.consume(vertex) {
+			// log.Infoln("not consumed", vertex)
+			// another worker already visited this vertex
+			continue
+		}
+
+		eg.Go(func() error {
+			var err error
+			err = t.visitorFn(ctx, vertex)
+			log.Infoln("error in graph visit", vertex, err)
+			// if err == nil {
+			// Update the status of the vertex.
+			graph.UpdateStatus(vertex, t.targetvertexStatus)
+			// }
+			log.Infoln("satisfied vertex", vertex)
+			vertexCh <- vertex
+			log.Infoln("all seen vertices", t.seen, graph.status)
+			return err
+		})
+	}
+}
+
+func (t *graphTraversal[V]) consume(vertex V) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.seen == nil {
+		t.seen = make(map[V]struct{})
+	}
+	if _, ok := t.seen[vertex]; ok {
+		return false
+	}
+	t.seen[vertex] = struct{}{}
+	return true
+}
+
+// UpdateStatus updates the status of a vertex.
+func (g *Graph[V]) UpdateStatus(vertex V, status string) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	g.status[vertex] = status
+}
+
+// GetStatus gets the status of a vertex.
+func (g *Graph[V]) GetStatus(vertex V) string {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	return g.status[vertex]
+}
+
+func getLeaves[V comparable](g *Graph[V]) []V {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	leaves := make([]V, 0)
+	for vtx := range g.vertices {
+		if len(g.vertices[vtx]) == 0 {
+			leaves = append(leaves, vtx)
+		}
+	}
+	return leaves
+}
+
+// getParents returns the parent vertices (incoming edges) of vtx.
+func getParents[V comparable](g *Graph[V], vtx V) []V {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	parents := make([]V, 0, g.inDegrees[vtx])
+	for v, neighbors := range g.vertices {
+		if neighbors[vtx] {
+			parents = append(parents, v)
+		}
+	}
+	return parents
+}
+
+// getChildren returns the child vertices (outgoing edges) of vtx.
+func getChildren[V comparable](g *Graph[V], vtx V) []V {
+	return g.Neighbors(vtx)
+}
+
+// filterParents filters parents based on the vertex status.
+func filterParents[V comparable](g *Graph[V], vtx V, status string) []V {
+	parents := getParents(g, vtx)
+	filtered := make([]V, 0, len(parents))
+	for _, parent := range parents {
+		if g.GetStatus(parent) == status {
+			filtered = append(filtered, parent)
+		}
+	}
+	return filtered
+}
+
+// filterChildren filters children based on the vertex status.
+func filterChildren[V comparable](g *Graph[V], vtx V, status string) []V {
+	children := getChildren(g, vtx)
+	filtered := make([]V, 0, len(children))
+	for _, child := range children {
+		if g.GetStatus(child) == status {
+			filtered = append(filtered, child)
+		}
+	}
+	// log.Infoln("status is", status, len(filtered), children)
+	return filtered
+}
+
+// getRoots returns the roots (vertexs with no incoming edges) in the graph.
+func getRoots[V comparable](g *Graph[V]) []V {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	roots := make([]V, 0)
+	for vtx, inDegree := range g.inDegrees {
+		if inDegree == 0 {
+			roots = append(roots, vtx)
+		}
+	}
+	return roots
 }

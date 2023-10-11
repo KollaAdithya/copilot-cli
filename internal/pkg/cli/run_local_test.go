@@ -663,12 +663,12 @@ func TestRunLocalOpts_Execute(t *testing.T) {
 						Credentials: credentials.NewStaticCredentials("myID", "mySecret", "myToken"),
 					},
 				},
-				cmd:             m.mockRunner,
-				dockerEngine:    m.dockerEngine,
-				repository:      m.repository,
-				targetEnv:       &mockEnv,
-				targetApp:       &mockApp,
-				containerSuffix: mockContainerSuffix,
+				cmd:          m.mockRunner,
+				dockerEngine: m.dockerEngine,
+				repository:   m.repository,
+				targetEnv:    &mockEnv,
+				targetApp:    &mockApp,
+				// containerSuffix: mockContainerSuffix,
 				newColor: func() *color.Color {
 					return nil
 				},

@@ -302,14 +302,22 @@ func (o *runLocalOpts) Execute() error {
 		}
 	}
 	dependencies := containerDependency(mft.Manifest())
-	deps := make(map[string]graph.ContainerDependency)
+	var vertices []string
+	for k := range dependencies {
+		vertices = append(vertices, k)
+	}
+	gh := graph.New(vertices...)
 	for k, v := range dependencies {
-		deps[k] = graph.ContainerDependency{
-			Essential: v.IsEssential,
-			DependsOn: graph.DependsOn(v.DependsOn),
+		for dep := range v.DependsOn {
+			if _, ok := dependencies[dep]; !ok {
+				return fmt.Errorf("container %s does not exist", dep)
+			}
+			gh.Add(graph.Edge[string]{
+				From: k,
+				To:   dep,
+			})
 		}
 	}
-	log.Infoln("dependencies are", dependencies)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -318,7 +326,7 @@ func (o *runLocalOpts) Execute() error {
 	gotSigInt := &atomic.Bool{}
 
 	g.Go(func() error {
-		defer cancel() // needed in case all containers exit successfully
+		// defer cancel() // needed in case all containers exit successfully
 
 		if err := o.runPauseContainer(ctx, ports); err != nil {
 			// if we've received a sigint, we want to ignore
@@ -328,12 +336,29 @@ func (o *runLocalOpts) Execute() error {
 			}
 			return fmt.Errorf("run pause container: %w", err)
 		}
-
-		err := o.runContainers(ctx, containerURIs, envVars)
-		if gotSigInt.Load() {
+		graph.WithStatus[string]("STOPPED")(gh)
+		var err error
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		eg, ctx := errgroup.WithContext(ctx)
+		err = gh.InDependencyOrder(ctx, func(ctx context.Context, name string) error {
+			if err := o.runContainer(ctx, cancel, name, containerURIs[name], envVars, dependencies[name].IsEssential, eg); err != nil {
+				return fmt.Errorf("error in run container in run local file: %w", err)
+			}
 			return nil
+		}, "STOPPED", "STARTED", eg)
+		// err = o.runContainers(ctx, containerURIs, envVars)
+		if err != nil {
+			if gotSigInt.Load() {
+				return nil
+			}
+			return err
 		}
-		return err
+		// log.Infoln("error in dependency", err)
+		// log.Infoln("returning after independency")
+		// err := o.runContainers(ctx, containerURIs, envVars)
+		log.Infoln("I am returning in dependency order")
+		return nil
 	})
 
 	g.Go(func() error {
@@ -350,16 +375,25 @@ func (o *runLocalOpts) Execute() error {
 			signal.Stop(sigCh)
 			fmt.Printf("\nStopping containers...\n\n")
 		}
-		return graph.InReverseDependencyOrder(context.Background(), deps, func(ctx context.Context, name string) error {
+		g, ctx := errgroup.WithContext(ctx)
+		gh1 := graph.New(vertices...)
+		graph.WithStatus[string]("STARTED")(gh1)
+		var err error
+		err = gh1.InReverseDependencyOrder(ctx, func(ctx context.Context, name string) error {
 			o.prog.Start(fmt.Sprintf("Stopping %q", name))
-			err := o.cleanUpContainer(context.Background(), name)
+			err := o.cleanUpContainer(ctx, name)
 			if err != nil {
 				return err
 			}
 			o.prog.Stop(log.Ssuccessf("Cleaned up %q\n", name))
 			return nil
-		})
-
+		}, "STARTED", "STOPPED", g)
+		err = o.cleanUpContainer(ctx, pauseContainerName)
+		if err != nil {
+			return err
+		}
+		log.Infoln("I am returning in reverse")
+		return nil
 	})
 
 	return g.Wait()
@@ -411,7 +445,6 @@ func (o *runLocalOpts) runPauseContainer(ctx context.Context, ports map[string]s
 		for {
 			isRunning, err := o.dockerEngine.IsContainerRunning(pauseContainerName)
 			if err != nil {
-				errCh <- fmt.Errorf("check if container is running: %w", err)
 				return
 			}
 			if isRunning {
@@ -433,36 +466,151 @@ func (o *runLocalOpts) runPauseContainer(ctx context.Context, ports map[string]s
 func (o *runLocalOpts) runContainers(ctx context.Context, containerURIs map[string]string, envVars map[string]containerEnv) error {
 	g, ctx := errgroup.WithContext(ctx)
 	for name, uri := range containerURIs {
-		name := name
-		uri := uri
 
-		vars, secrets := make(map[string]string), make(map[string]string)
-		for k, v := range envVars[name] {
-			if v.Secret {
-				secrets[k] = v.Value
-			} else {
-				vars[k] = v.Value
+		for k, v := range containerURIs {
+			log.Infoln(k, v)
+			name := name
+			uri := uri
+
+			vars, secrets := make(map[string]string), make(map[string]string)
+			for k, v := range envVars[name] {
+				if v.Secret {
+					secrets[k] = v.Value
+				} else {
+					vars[k] = v.Value
+				}
+			}
+
+			// Execute each container run in a separate goroutine
+			g.Go(func() error {
+				runOptions := &dockerengine.RunOptions{
+					ImageURI:         uri,
+					ContainerName:    name,
+					Secrets:          secrets,
+					EnvVars:          vars,
+					ContainerNetwork: pauseContainerName,
+					LogOptions: dockerengine.RunLogOptions{
+						Color:      o.newColor(),
+						LinePrefix: fmt.Sprintf("[%s] ", name),
+					},
+				}
+				if err := o.dockerEngine.Run(ctx, runOptions); err != nil {
+					return fmt.Errorf("run container %q: %w", name, err)
+				}
+				return nil
+			})
+		}
+	}
+
+	return g.Wait()
+}
+
+func (o *runLocalOpts) runContainer(ctx context.Context, cancelFn context.CancelFunc, name, uri string, envVars map[string]containerEnv, isEssential bool, g *errgroup.Group) error {
+	vars, secrets := make(map[string]string), make(map[string]string)
+	for k, v := range envVars[name] {
+		if v.Secret {
+			secrets[k] = v.Value
+		} else {
+			vars[k] = v.Value
+		}
+	}
+
+	runOptions := &dockerengine.RunOptions{
+		ImageURI:         uri,
+		ContainerName:    name,
+		ContainerNetwork: pauseContainerName,
+		LogOptions: dockerengine.RunLogOptions{
+			Color:      o.newColor(),
+			LinePrefix: fmt.Sprintf("[%s] ", name),
+		},
+	}
+
+	//channel to receive any error from the goroutine
+	errCh := make(chan error, 1)
+
+	go func() {
+		if err := o.dockerEngine.Run(ctx, runOptions); err != nil {
+			errCh <- err
+		}
+	}()
+
+	eg, _ := errgroup.WithContext(ctx)
+
+	// go routine to check if pause container is running
+	eg.Go(func() error {
+		for {
+			isRunning, err := o.dockerEngine.IsContainerRunning(name)
+			var errContainerExited *dockerengine.ErrContainerExited
+			if err != nil {
+				log.Infoln("container exited", name, err)
+				if errors.As(err, &errContainerExited) && isEssential {
+					errCh <- fmt.Errorf("check if container is running: %w", err)
+					cancelFn()
+					return fmt.Errorf("check if container is running: %w", err)
+				}
+				if errors.As(err, &errContainerExited) && !isEssential {
+					log.Infoln("not essential", name)
+					errCh <- nil
+					return nil
+				}
+			}
+			if isRunning {
+				log.Infoln("container is running")
+				errCh <- nil
+				return nil
+			}
+			// If the container isn't running yet, sleep for a short duration before checking again.
+			time.Sleep(time.Second)
+		}
+	})
+	err := <-errCh
+	if err != nil {
+		return err
+	}
+	return eg.Wait()
+}
+
+// func waitForRunningOrExitStatus(name string) error {
+// 	g, ctx := errgroup.WithContext(context.Background())
+// 	g.Go(func() error {
+// 		for {
+// 			ticker := time.NewTicker(500 * time.Millisecond)
+// 			defer ticker.Stop()
+// 			select {
+// 			case <-ticker.C:
+// 			case <-ctx.Done():
+// 				return nil
+// 			}
+// 		}
+// 	})
+// }
+
+func (o *runLocalOpts) waitForDependency(ctx context.Context, containerName string, dep manifest.ContainerDependency) error {
+	g, ctx := errgroup.WithContext(ctx)
+	for name, state := range dep.DependsOn {
+		name := name
+		state := state
+
+		for {
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				return nil
+			}
+			switch state {
+			case "Start":
+				isRunning, err := o.dockerEngine.IsContainerRunning(containerName)
+				if err != nil {
+					return err
+				}
+				if isRunning {
+					return nil
+				}
+				return fmt.Errorf("dependency container %s failed to start", name)
 			}
 		}
-
-		// Execute each container run in a separate goroutine
-		g.Go(func() error {
-			runOptions := &dockerengine.RunOptions{
-				ImageURI:         uri,
-				ContainerName:    name,
-				Secrets:          secrets,
-				EnvVars:          vars,
-				ContainerNetwork: pauseContainerName,
-				LogOptions: dockerengine.RunLogOptions{
-					Color:      o.newColor(),
-					LinePrefix: fmt.Sprintf("[%s] ", name),
-				},
-			}
-			if err := o.dockerEngine.Run(ctx, runOptions); err != nil {
-				return fmt.Errorf("run container %q: %w", name, err)
-			}
-			return nil
-		})
 	}
 
 	return g.Wait()
@@ -494,7 +642,7 @@ func (o *runLocalOpts) cleanUpContainer(ctx context.Context, name string) error 
 	// 	return o.cleanUpContainers(context.Background(), l)
 	// })
 
-	log.Infoln("name is", name)
+	// log.Infoln("name is", name)
 	// o.prog.Start(fmt.Sprintf("Stopping %q", name))
 	if err := cleanUp(name); err != nil {
 		return err

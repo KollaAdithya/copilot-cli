@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/aws/copilot-cli/internal/pkg/exec"
+	"github.com/aws/copilot-cli/internal/pkg/term/log"
 	"github.com/fatih/color"
 	"golang.org/x/sync/errgroup"
 )
@@ -226,7 +227,7 @@ func (c DockerCmdClient) Push(ctx context.Context, uri string, w io.Writer, tags
 
 func (in *RunOptions) generateRunArguments() []string {
 	args := []string{"run"}
-
+	// args = append(args, "--rm")
 	if in.ContainerName != "" {
 		args = append(args, "--name", in.ContainerName)
 	}
@@ -292,7 +293,7 @@ func (c DockerCmdClient) Run(ctx context.Context, options *RunOptions) error {
 		defer stdout.Close()
 		stderr := logger()
 		defer stderr.Close()
-
+		log.Infoln(options.generateRunArguments())
 		if err := c.runner.RunWithContext(ctx, "docker", options.generateRunArguments(), exec.Stdout(stdout), exec.Stderr(stderr)); err != nil {
 			return fmt.Errorf("running container: %w", err)
 		}
@@ -305,12 +306,48 @@ func (c DockerCmdClient) Run(ctx context.Context, options *RunOptions) error {
 // IsContainerRunning checks if a specific Docker container is running.
 func (c DockerCmdClient) IsContainerRunning(containerName string) (bool, error) {
 	buf := &bytes.Buffer{}
-	if err := c.runner.Run("docker", []string{"ps", "-q", "--filter", "name=" + containerName}, exec.Stdout(buf)); err != nil {
+	if err := c.runner.Run("docker", []string{"ps", "-a", "-q", "--filter", "name=" + containerName}, exec.Stdout(buf)); err != nil {
+		log.Infoln("error docker ps", err)
 		return false, fmt.Errorf("run docker ps: %w", err)
 	}
 
 	output := strings.TrimSpace(buf.String())
-	return output != "", nil
+	if output == "" {
+		return false, nil
+	}
+	buf1 := &bytes.Buffer{}
+	if output != "" {
+		arr := []string{"inspect", "--format", "'{{json .State.Status}}'"}
+		// s1 := strings.Join([]string{"|", "jq", "-r", "'.Running'"}, " ")
+		arr = append(arr, output)
+		// log.Infoln(arr)
+		if err := c.runner.Run("docker", arr, exec.Stdout(buf1)); err != nil {
+			log.Infoln("error docker inspect,", containerName, err)
+			return false, fmt.Errorf("run docker ps: %w", err)
+		}
+	}
+	output1 := strings.Trim(strings.TrimSpace(buf1.String()), `"'`)
+	// container, err := c.DockerContainerState(containerName)
+	// if err != nil {
+	// 	return false, err
+	// }
+	// log.Infoln("containerName and status", containerName, container)
+	switch output1 {
+	case "running":
+		return true, nil
+	case "exited":
+		return false, &ErrContainerExited{name: containerName}
+	}
+	return false, nil
+}
+
+type ErrContainerExited struct {
+	name     string
+	exitcode int
+}
+
+func (e *ErrContainerExited) Error() string {
+	return fmt.Sprintf("container %s exited(%d)", e.name, e.exitcode)
 }
 
 // Stop calls `docker stop` to stop a running container.
@@ -457,3 +494,109 @@ type errEmptyImageTags struct {
 func (e *errEmptyImageTags) Error() string {
 	return fmt.Sprintf("tags to reference an image should not be empty for building and pushing into the ECR repository %s", e.uri)
 }
+
+type DockerContainerState struct {
+	Status   string `json:"Status"`
+	ExitCode int    `json:"ExitCode"`
+	Health   *struct {
+		Status string `json:"Status"`
+	}
+}
+
+func (d *DockerContainerState) IsRunning(containerName string) (bool, error) {
+	switch d.Status {
+	case "running":
+		return true, nil
+	case "exited":
+		return false, &ErrContainerExited{name: containerName, exitcode: d.ExitCode}
+	}
+	return false, nil
+}
+
+func (d *DockerContainerState) IsComplete() bool {
+	return d.Status == "exited"
+}
+
+func (d *DockerContainerState) IsSucess() bool {
+	return d.Status == "exited" && d.ExitCode == 0
+}
+
+func (d *DockerContainerState) IsHealthy(containerName string) (bool, error) {
+	if d.Status == "exited" {
+		return false, &ErrContainerExited{name: containerName, exitcode: d.ExitCode}
+	}
+	if d.Health == nil {
+		return false, fmt.Errorf("helathcheck not configured for container %s", containerName)
+	}
+	switch d.Health.Status {
+	case "healthy":
+		return true, nil
+	case "unhealthy":
+		return false, fmt.Errorf("container %s is unhealthy", containerName)
+	case "starting":
+		return false, nil
+	default:
+		return false, fmt.Errorf("container %s had unexpected health status %q", containerName, d.Health.Status)
+	}
+	// return false, nil
+}
+
+// UnmarshalDockerInspect unmarshals the output of "docker inspect" into a DockerContainer struct.
+func (d *DockerCmdClient) DockerContainerState(containerName string) (DockerContainerState, error) {
+	containerID, err := d.containerID(containerName)
+	if err != nil {
+		return DockerContainerState{}, err
+	}
+	if containerID == "" {
+		return DockerContainerState{}, nil
+	}
+	arr := []string{"inspect", "--format", "{{json .State}}"}
+	arr = append(arr, containerID)
+	buf := &bytes.Buffer{}
+	log.Infoln("value of container ID %s for coname %s is", containerID, containerName)
+	if err := d.runner.Run("docker", arr, exec.Stdout(buf)); err != nil {
+		return DockerContainerState{}, fmt.Errorf("run docker ps: %w", err)
+	}
+	// log.Infoln("state container is", strings.TrimSpace(buf.String()))
+	var containerInfo DockerContainerState
+	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &containerInfo); err != nil {
+		return DockerContainerState{}, fmt.Errorf("error unmarshal inspect:%w", err)
+	}
+
+	return containerInfo, nil
+}
+
+func (d *DockerCmdClient) containerID(containerName string) (string, error) {
+	buf := &bytes.Buffer{}
+	if err := d.runner.Run("docker", []string{"ps", "-a", "-q", "--filter", "name=" + containerName}, exec.Stdout(buf)); err != nil {
+		return "", fmt.Errorf("run docker ps: %w", err)
+	}
+	return strings.TrimSpace(buf.String()), nil
+}
+
+// // IsContainerRunning checks if a Docker container is running.
+// func IsContainerRunning(containerID string) (bool, error) {
+// 	container, err := UnmarshalDockerInspect(containerID)
+// 	if err != nil {
+// 		return false, err
+// 	}
+// 	return strings.HasPrefix(container.Status, "Up"), nil
+// }
+
+// // IsContainerExited checks if a Docker container has exited.
+// func IsContainerExited(containerID string) (bool, error) {
+// 	container, err := UnmarshalDockerInspect(containerID)
+// 	if err != nil {
+// 		return false, err
+// 	}
+// 	return container.Status == "exited", nil
+// }
+
+// // IsContainerHealthy checks if a Docker container is healthy.
+// func IsContainerHealthy(containerID string) (bool, error) {
+// 	container, err := UnmarshalDockerInspect(containerID)
+// 	if err != nil {
+// 		return false, err
+// 	}
+// 	return container.Health.Status == "healthy", nil
+// }

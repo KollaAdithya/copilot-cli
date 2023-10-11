@@ -1,5 +1,5 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+// // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// // SPDX-License-Identifier: Apache-2.0
 
 package graph
 
@@ -175,6 +175,48 @@ func TestGraph_IsAcyclic(t *testing.T) {
 			// THEN
 			require.Equal(t, tc.isAcyclic, gotAcyclic)
 			require.ElementsMatch(t, tc.cycle, gotCycle)
+		})
+	}
+}
+
+func TestGraph_Parents(t *testing.T) {
+	testCases := map[string]struct {
+		graph *Graph[int]
+
+		wantedRoots []int
+	}{
+		"should return nil if the graph is empty": {
+			graph: New[int](),
+		},
+		"should return all the vertices if there are no edges in the graph": {
+			graph:       New[int](1, 2, 3, 4, 5),
+			wantedRoots: []int{1, 2, 3, 4, 5},
+		},
+		"should return only vertices with no in degrees": {
+			graph: func() *Graph[int] {
+				g := New[int]()
+				g.Add(Edge[int]{
+					From: 1,
+					To:   3,
+				})
+				g.Add(Edge[int]{
+					From: 2,
+					To:   3,
+				})
+				g.Add(Edge[int]{
+					From: 3,
+					To:   4,
+				})
+				return g
+			}(),
+
+			wantedRoots: []int{4},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require.ElementsMatch(t, tc.wantedRoots, getLeaves(tc.graph))
 		})
 	}
 }
