@@ -216,7 +216,7 @@ func TestGraph_Parents(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			require.ElementsMatch(t, tc.wantedRoots, getLeaves(tc.graph))
+			require.ElementsMatch(t, tc.wantedRoots, tc.graph.getLeaves())
 		})
 	}
 }

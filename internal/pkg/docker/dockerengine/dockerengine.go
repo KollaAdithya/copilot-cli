@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/aws/copilot-cli/internal/pkg/exec"
 	"github.com/aws/copilot-cli/internal/pkg/term/log"
@@ -295,6 +296,12 @@ func (c DockerCmdClient) Run(ctx context.Context, options *RunOptions) error {
 		defer stderr.Close()
 		log.Infoln(options.generateRunArguments())
 		if err := c.runner.RunWithContext(ctx, "docker", options.generateRunArguments(), exec.Stdout(stdout), exec.Stderr(stderr)); err != nil {
+			if exitErr, ok := err.(*osexec.ExitError); ok {
+				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.ExitStatus() == 1 {
+					log.Infoln("Docker run command exited with status 1. Ignoring.")
+					return nil
+				}
+			}
 			return fmt.Errorf("running container: %w", err)
 		}
 		return nil

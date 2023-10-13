@@ -8,7 +8,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/aws/copilot-cli/internal/pkg/term/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -290,13 +289,13 @@ func dfsCollect[V comparable](g *Graph[V], v V, visited map[V]bool, nodes *[]V) 
 
 // InDependencyOrder applies the function to the vertices of the graph taking into account the dependency order.
 // The function visits vertices in a topological order based on their dependencies.
-func (g *Graph[V]) InDependencyOrder(ctx context.Context, fn func(ctx context.Context, v V) error, adjacentvertexStatusToSkip, targetvertexStatus string, eg *errgroup.Group, options ...func(*graphTraversal[V])) error {
+func (g *Graph[V]) InDependencyOrder(ctx context.Context, fn func(ctx context.Context, v V) error, adjacentvertexStatusToSkip, targetvertexStatus string, options ...func(*graphTraversal[V])) error {
 	t := upDirectionTraversal(fn, adjacentvertexStatusToSkip, targetvertexStatus)
 	for _, option := range options {
 		option(t)
 	}
 	// log.Infoln("inital vertre status", g.status)
-	return t.visit(ctx, g, eg)
+	return t.visit(ctx, g)
 }
 
 func (g *Graph[V]) InReverseDependencyOrder(ctx context.Context, fn func(ctx context.Context, v V) error, adjacentvertexStatusToSkip, targetvertexStatus string, eg *errgroup.Group, options ...func(*graphTraversal[V])) error {
@@ -304,7 +303,7 @@ func (g *Graph[V]) InReverseDependencyOrder(ctx context.Context, fn func(ctx con
 	for _, option := range options {
 		option(t)
 	}
-	return t.visit(ctx, g, eg)
+	return t.visit(ctx, g)
 }
 
 type graphTraversal[V comparable] struct {
@@ -321,7 +320,7 @@ type graphTraversal[V comparable] struct {
 
 func upDirectionTraversal[V comparable](visitorFn func(context.Context, V) error, adjacentvertexStatusToSkip, targetvertexStatus string) *graphTraversal[V] {
 	return &graphTraversal[V]{
-		extremityvertexsFn:         func(g *Graph[V]) []V { return getLeaves(g) },
+		extremityvertexsFn:         func(g *Graph[V]) []V { return g.getLeaves() },
 		adjacentvertexsFn:          func(g *Graph[V], vtx V) []V { return getParents(g, vtx) },
 		filterAdjacentFnByStatus:   func(g *Graph[V], vtx V, status string) []V { return filterChildren(g, vtx, status) },
 		adjacentvertexStatusToSkip: adjacentvertexStatusToSkip,
@@ -341,14 +340,14 @@ func downDirectionTraversal[V comparable](visitorFn func(context.Context, V) err
 	}
 }
 
-func (t *graphTraversal[V]) visit(ctx context.Context, graph *Graph[V], eg *errgroup.Group) error {
+func (t *graphTraversal[V]) visit(ctx context.Context, graph *Graph[V]) error {
 	expect := len(graph.vertices)
 	// log.Infoln("len of vertices", expect)
 	if expect == 0 {
 		return nil
 	}
 
-	// eg, ctx := errgroup.WithContext(ctx)
+	eg, ctx := errgroup.WithContext(ctx)
 	vertexCh := make(chan V, expect)
 	defer close(vertexCh)
 
@@ -369,13 +368,13 @@ func (t *graphTraversal[V]) visit(ctx context.Context, graph *Graph[V], eg *errg
 		}
 	})
 
-	vertexs := t.extremityvertexsFn(graph)
-	t.run(ctx, graph, eg, vertexs, vertexCh)
+	vertices := t.extremityvertexsFn(graph)
+	t.run(ctx, graph, eg, vertices, vertexCh)
 	return eg.Wait()
 }
 
-func (t *graphTraversal[V]) run(ctx context.Context, graph *Graph[V], eg *errgroup.Group, vertexs []V, vertexCh chan V) {
-	for _, vertex := range vertexs {
+func (t *graphTraversal[V]) run(ctx context.Context, graph *Graph[V], eg *errgroup.Group, vertices []V, vertexCh chan V) {
+	for _, vertex := range vertices {
 		// Don't start this vertex yet if all of its children have
 		// not been started yet.
 		if len(t.filterAdjacentFnByStatus(graph, vertex, t.adjacentvertexStatusToSkip)) != 0 {
@@ -391,17 +390,20 @@ func (t *graphTraversal[V]) run(ctx context.Context, graph *Graph[V], eg *errgro
 		}
 
 		eg.Go(func() error {
-			var err error
-			err = t.visitorFn(ctx, vertex)
-			log.Infoln("error in graph visit", vertex, err)
+			// var err error
+			err := t.visitorFn(ctx, vertex)
+			if err != nil {
+				return err
+			}
+			// log.Infoln("error in graph visit", vertex, err)
 			// if err == nil {
 			// Update the status of the vertex.
 			graph.UpdateStatus(vertex, t.targetvertexStatus)
 			// }
-			log.Infoln("satisfied vertex", vertex)
+			// log.Infoln("satisfied vertex", vertex)
 			vertexCh <- vertex
-			log.Infoln("all seen vertices", t.seen, graph.status)
-			return err
+			// log.Infoln("all seen vertices", t.seen, graph.status)
+			return nil
 		})
 	}
 }
@@ -433,7 +435,7 @@ func (g *Graph[V]) GetStatus(vertex V) string {
 	return g.status[vertex]
 }
 
-func getLeaves[V comparable](g *Graph[V]) []V {
+func (g *Graph[V]) getLeaves() []V {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 	leaves := make([]V, 0)
@@ -488,7 +490,7 @@ func filterChildren[V comparable](g *Graph[V], vtx V, status string) []V {
 	return filtered
 }
 
-// getRoots returns the roots (vertexs with no incoming edges) in the graph.
+// getRoots returns the roots (vertices with no incoming edges) in the graph.
 func getRoots[V comparable](g *Graph[V]) []V {
 	g.lock.Lock()
 	defer g.lock.Unlock()

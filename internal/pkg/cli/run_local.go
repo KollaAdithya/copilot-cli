@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -323,80 +322,68 @@ func (o *runLocalOpts) Execute() error {
 	defer cancel()
 
 	g, ctx := errgroup.WithContext(ctx)
-	gotSigInt := &atomic.Bool{}
+	// gotSigInt := &atomic.Bool{}
 
 	g.Go(func() error {
-		// defer cancel() // needed in case all containers exit successfully
-
 		if err := o.runPauseContainer(ctx, ports); err != nil {
-			// if we've received a sigint, we want to ignore
-			// any errors coming from this goroutine
-			if gotSigInt.Load() {
-				return nil
-			}
 			return fmt.Errorf("run pause container: %w", err)
 		}
 		graph.WithStatus[string]("STOPPED")(gh)
-		var err error
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		eg, ctx := errgroup.WithContext(ctx)
-		err = gh.InDependencyOrder(ctx, func(ctx context.Context, name string) error {
-			if err := o.runContainer(ctx, cancel, name, containerURIs[name], envVars, dependencies[name].IsEssential, eg); err != nil {
-				return fmt.Errorf("error in run container in run local file: %w", err)
+		return gh.InDependencyOrder(ctx, func(ctx context.Context, name string) error {
+			if err := o.runContainer(ctx, name, containerURIs[name], envVars, dependencies[name].IsEssential, eg); err != nil {
+				return fmt.Errorf("run container %s: %w", name, err)
 			}
 			return nil
-		}, "STOPPED", "STARTED", eg)
-		// err = o.runContainers(ctx, containerURIs, envVars)
-		if err != nil {
-			if gotSigInt.Load() {
-				return nil
-			}
-			return err
-		}
-		// log.Infoln("error in dependency", err)
-		// log.Infoln("returning after independency")
-		// err := o.runContainers(ctx, containerURIs, envVars)
-		log.Infoln("I am returning in dependency order")
-		return nil
+		}, "STOPPED", "STARTED")
 	})
 
 	g.Go(func() error {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		defer signal.Stop(sigCh)
-
 		select {
 		case <-ctx.Done():
 		case <-sigCh:
-			gotSigInt.Store(true)
+			// gotSigInt.Store(true)
 			// reset signal handler in case we get ctrl+c again
 			// while trying to stop containers
 			signal.Stop(sigCh)
 			fmt.Printf("\nStopping containers...\n\n")
 		}
-		g, ctx := errgroup.WithContext(ctx)
-		gh1 := graph.New(vertices...)
-		graph.WithStatus[string]("STARTED")(gh1)
-		var err error
-		err = gh1.InReverseDependencyOrder(ctx, func(ctx context.Context, name string) error {
-			o.prog.Start(fmt.Sprintf("Stopping %q", name))
-			err := o.cleanUpContainer(ctx, name)
-			if err != nil {
-				return err
-			}
-			o.prog.Stop(log.Ssuccessf("Cleaned up %q\n", name))
-			return nil
-		}, "STARTED", "STOPPED", g)
-		err = o.cleanUpContainer(ctx, pauseContainerName)
-		if err != nil {
-			return err
-		}
-		log.Infoln("I am returning in reverse")
+		// g, ctx := errgroup.WithContext(ctx)
+		// gh1 := graph.New(vertices...)
+		// graph.WithStatus[string]("STARTED")(gh1)
+		// if err := gh1.InReverseDependencyOrder(ctx, func(ctx context.Context, name string) error {
+		// 	// o.prog.Start(fmt.Sprintf("Stopping %q", name))
+		// 	err := o.cleanUpContainer(ctx, name)
+		// 	if err != nil {
+		// 		return err
+		// 	}
+		// 	// o.prog.Stop(log.Ssuccessf("Cleaned up %q\n", name))
+		// 	log.Ssuccessf("Cleaned up %q\n", name)
+		// 	return nil
+		// }, "STARTED", "STOPPED", g); err != nil {
+		// 	return err
+		// }
+		// o.prog.Start(fmt.Sprintf("Stopping %q", pauseContainerName))
+		// if err = o.cleanUpContainer(ctx, pauseContainerName); err != nil {
+		// 	return err
+		// }
+		// o.prog.Stop(log.Ssuccessf("Cleaned up %q\n", pauseContainerName))
+		// return nil
 		return nil
 	})
 
-	return g.Wait()
+	if err := g.Wait(); err != nil {
+		// if gotSigInt.Load() {
+		// 	return nil
+		// }
+		return err
+	}
+	return nil
 }
 
 func containerDependency(unmarshaledManifest interface{}) map[string]manifest.ContainerDependency {
@@ -505,7 +492,7 @@ func (o *runLocalOpts) runContainers(ctx context.Context, containerURIs map[stri
 	return g.Wait()
 }
 
-func (o *runLocalOpts) runContainer(ctx context.Context, cancelFn context.CancelFunc, name, uri string, envVars map[string]containerEnv, isEssential bool, g *errgroup.Group) error {
+func (o *runLocalOpts) runContainer(ctx context.Context, name, uri string, envVars map[string]containerEnv, isEssential bool, g *errgroup.Group) error {
 	vars, secrets := make(map[string]string), make(map[string]string)
 	for k, v := range envVars[name] {
 		if v.Secret {
@@ -525,48 +512,49 @@ func (o *runLocalOpts) runContainer(ctx context.Context, cancelFn context.Cancel
 		},
 	}
 
-	//channel to receive any error from the goroutine
-	errCh := make(chan error, 1)
+	eg, ctx := errgroup.WithContext(ctx)
+	runErrCh := make(chan error, 1)
 
-	go func() {
+	// Starting the container in a non-blocking manner
+	go func() error {
 		if err := o.dockerEngine.Run(ctx, runOptions); err != nil {
-			errCh <- err
+			runErrCh <- err
 		}
+		return nil
 	}()
 
-	eg, _ := errgroup.WithContext(ctx)
-
-	// go routine to check if pause container is running
+	// Monitoring the container
 	eg.Go(func() error {
 		for {
-			isRunning, err := o.dockerEngine.IsContainerRunning(name)
-			var errContainerExited *dockerengine.ErrContainerExited
-			if err != nil {
-				log.Infoln("container exited", name, err)
-				if errors.As(err, &errContainerExited) && isEssential {
-					errCh <- fmt.Errorf("check if container is running: %w", err)
-					cancelFn()
+			select {
+			case <-ctx.Done():
+				return nil // exit if context is canceled
+			case err := <-runErrCh:
+				return err // if we get an error from the Run method, propagate it
+			default:
+				isRunning, err := o.dockerEngine.IsContainerRunning(name)
+				var errContainerExited *dockerengine.ErrContainerExited
+
+				if err != nil {
+					if errors.As(err, &errContainerExited) {
+						if isEssential {
+							return fmt.Errorf("essential container exited: %w", err)
+						}
+						log.Infof("Non-essential container %s exited", name)
+						return nil
+					}
 					return fmt.Errorf("check if container is running: %w", err)
 				}
-				if errors.As(err, &errContainerExited) && !isEssential {
-					log.Infoln("not essential", name)
-					errCh <- nil
+
+				if isRunning {
+					log.Infof("Container %s is running", name)
 					return nil
 				}
+
+				time.Sleep(time.Second) // wait before checking again
 			}
-			if isRunning {
-				log.Infoln("container is running")
-				errCh <- nil
-				return nil
-			}
-			// If the container isn't running yet, sleep for a short duration before checking again.
-			time.Sleep(time.Second)
 		}
 	})
-	err := <-errCh
-	if err != nil {
-		return err
-	}
 	return eg.Wait()
 }
 
