@@ -35,7 +35,7 @@ Copilot v1.33 brings big enhancements to help you develop more flexibly and effi
 
 ## Container dependencies support for `copilot run local`
 
-`copilot run local` now respects the [depends_on](../docs/manifest/lb-web-service.md#http-additional-rules-alias) specified in the service manifest.
+`copilot run local` now respects the [depends_on](../docs/manifest/lb-web-service.md#http-additional-rules) specified in the service manifest.
 
 For Example:
 
